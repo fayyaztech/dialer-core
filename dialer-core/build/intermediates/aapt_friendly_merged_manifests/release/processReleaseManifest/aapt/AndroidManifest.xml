@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.fayyaztech.dialer_core" >
+
+    <uses-sdk android:minSdkVersion="24" />
+
+    <!-- Core telephony permissions required by the dialer core module -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.READ_PRECISE_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+    <uses-permission android:name="android.permission.WRITE_CALL_LOG" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- OEM compatibility for write-call-log on older devices -->
+    <uses-permission
+        android:name="android.permission.PROCESS_OUTGOING_CALLS"
+        tools:ignore="Deprecated" />
+
+    <!-- Android 13+ notifications runtime permission -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission
+        android:name="android.permission.USE_FULL_SCREEN_INTENT"
+        tools:ignore="FullScreenIntentPolicy" />
+
+    <!-- Telephony feature requirements (optional for development/testing) -->
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.telephony.gsm"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.telephony.cdma"
+        android:required="false" />
+
+    <application>
+
+        <!-- In-Call Screen Activity -->
+        <activity
+            android:name="com.fayyaztech.dialer_core.ui.call.CallScreenActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:showForAllUsers="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            tools:targetApi="31" >
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="tel" />
+            </intent-filter>
+        </activity>
+
+        <!-- Call State Observer Service (foreground service for call monitoring) -->
+        <service
+            android:name="com.fayyaztech.dialer_core.services.CallStateObserverService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="phoneCall" />
+
+        <!-- Default InCall Service (binds to Telecom framework) -->
+        <service
+            android:name="com.fayyaztech.dialer_core.services.DefaultInCallService"
+            android:exported="true"
+            android:foregroundServiceType="phoneCall"
+            android:permission="android.permission.BIND_INCALL_SERVICE"
+            tools:targetApi="31" >
+
+            <!-- Advertise that this service plays ringtones for incoming calls -->
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_RINGING"
+                android:value="true" />
+            <!-- Advertise basic in-call UI capability (Android 12+) -->
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_UI"
+                android:value="true" />
+            <!-- Call streaming support (set to false unless app supports it) -->
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_SUPPORTS_CALL_STREAMING"
+                android:value="false" />
+            <!-- Video calling support (Android 12-14) -->
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_SUPPORTS_VIDEO_CALLING"
+                android:value="false" />
+            <!-- Intent filter for InCallService binding -->
+            <intent-filter>
+                <action android:name="android.telecom.InCallService" />
+            </intent-filter>
+        </service>
+
+        <!-- Call Screening Service (for spam detection / call blocking) -->
+        <service
+            android:name="com.fayyaztech.dialer_core.services.CallScreeningService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SCREENING_SERVICE"
+            tools:ignore="ExportedService"
+            tools:targetApi="31" >
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
+
+        <!-- Incoming Call Receiver (handles PHONE_STATE broadcasts) -->
+        <receiver
+            android:name="com.fayyaztech.dialer_core.services.IncomingCallReceiver"
+            android:enabled="true"
+            android:exported="false" >
+            <intent-filter android:priority="100" >
+                <action android:name="android.intent.action.PHONE_STATE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Call Action Receiver (handles notification actions: accept/reject/hangup) -->
+        <receiver
+            android:name="com.fayyaztech.dialer_core.services.CallActionReceiver"
+            android:enabled="true"
+            android:exported="false" >
+        </receiver>
+    </application>
+
+</manifest>

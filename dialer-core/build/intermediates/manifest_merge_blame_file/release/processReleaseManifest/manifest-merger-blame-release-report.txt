@@ -1,0 +1,240 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    xmlns:tools="http://schemas.android.com/tools"
+4    package="com.fayyaztech.dialer_core" >
+5
+6    <uses-sdk android:minSdkVersion="24" />
+7
+8    <!-- Core telephony permissions required by the dialer core module -->
+9    <uses-permission android:name="android.permission.CALL_PHONE" />
+9-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:6:5-69
+9-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:6:22-66
+10    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+10-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:7:5-75
+10-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:7:22-72
+11    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+11-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:8:5-72
+11-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:8:22-69
+12    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+12-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:9:5-71
+12-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:9:22-68
+13    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+13-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:10:5-80
+13-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:10:22-77
+14    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+14-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:11:5-77
+14-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:11:22-74
+15    <uses-permission android:name="android.permission.READ_PRECISE_PHONE_STATE" />
+15-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:12:5-83
+15-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:12:22-80
+16    <uses-permission android:name="android.permission.READ_CONTACTS" />
+16-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:13:5-72
+16-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:13:22-69
+17    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+17-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:14:5-73
+17-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:14:22-70
+18    <uses-permission android:name="android.permission.WRITE_CALL_LOG" />
+18-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:15:5-73
+18-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:15:22-70
+19    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+19-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:16:5-77
+19-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:16:22-74
+20    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+20-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:17:5-88
+20-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:17:22-85
+21    <uses-permission android:name="android.permission.WAKE_LOCK" />
+21-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:18:5-68
+21-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:18:22-65
+22
+23    <!-- OEM compatibility for write-call-log on older devices -->
+24    <uses-permission
+24-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:21:5-22:37
+25        android:name="android.permission.PROCESS_OUTGOING_CALLS"
+25-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:21:22-78
+26        tools:ignore="Deprecated" />
+26-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:22:9-34
+27
+28    <!-- Android 13+ notifications runtime permission -->
+29    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+29-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:25:5-77
+29-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:25:22-74
+30    <uses-permission
+30-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:26:5-27:49
+31        android:name="android.permission.USE_FULL_SCREEN_INTENT"
+31-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:26:22-78
+32        tools:ignore="FullScreenIntentPolicy" />
+32-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:27:9-46
+33
+34    <!-- Telephony feature requirements (optional for development/testing) -->
+35    <uses-feature
+35-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:30:5-88
+36        android:name="android.hardware.telephony"
+36-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:30:19-60
+37        android:required="false" />
+37-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:30:61-85
+38    <uses-feature
+38-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:31:5-92
+39        android:name="android.hardware.telephony.gsm"
+39-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:31:19-64
+40        android:required="false" />
+40-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:31:65-89
+41    <uses-feature
+41-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:32:5-93
+42        android:name="android.hardware.telephony.cdma"
+42-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:32:19-65
+43        android:required="false" />
+43-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:32:66-90
+44
+45    <application>
+45-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:34:5-116:19
+46
+47        <!-- In-Call Screen Activity -->
+48        <activity
+48-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:36:9-50:20
+49            android:name="com.fayyaztech.dialer_core.ui.call.CallScreenActivity"
+49-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:37:13-81
+50            android:excludeFromRecents="true"
+50-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:39:13-46
+51            android:exported="true"
+51-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:44:13-36
+52            android:launchMode="singleTop"
+52-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:40:13-43
+53            android:showForAllUsers="true"
+53-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:43:13-43
+54            android:showWhenLocked="true"
+54-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:41:13-42
+55            android:turnScreenOn="true"
+55-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:42:13-40
+56            tools:targetApi="31" >
+56-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:38:13-33
+57            <intent-filter>
+57-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:45:13-49:29
+58                <action android:name="android.intent.action.VIEW" />
+58-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:46:17-69
+58-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:46:25-66
+59
+60                <category android:name="android.intent.category.DEFAULT" />
+60-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:47:17-76
+60-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:47:27-73
+61
+62                <data android:scheme="tel" />
+62-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:48:17-46
+62-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:48:23-43
+63            </intent-filter>
+64        </activity>
+65
+66        <!-- Call State Observer Service (foreground service for call monitoring) -->
+67        <service
+67-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:53:9-57:57
+68            android:name="com.fayyaztech.dialer_core.services.CallStateObserverService"
+68-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:54:13-88
+69            android:enabled="true"
+69-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:55:13-35
+70            android:exported="false"
+70-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:56:13-37
+71            android:foregroundServiceType="phoneCall" />
+71-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:57:13-54
+72
+73        <!-- Default InCall Service (binds to Telecom framework) -->
+74        <service
+74-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:60:9-86:19
+75            android:name="com.fayyaztech.dialer_core.services.DefaultInCallService"
+75-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:61:13-84
+76            android:exported="true"
+76-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:64:13-36
+77            android:foregroundServiceType="phoneCall"
+77-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:65:13-54
+78            android:permission="android.permission.BIND_INCALL_SERVICE"
+78-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:63:13-72
+79            tools:targetApi="31" >
+79-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:62:13-33
+80
+81            <!-- Advertise that this service plays ringtones for incoming calls -->
+82            <meta-data
+82-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:67:13-69:40
+83                android:name="android.telecom.IN_CALL_SERVICE_RINGING"
+83-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:68:17-71
+84                android:value="true" />
+84-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:69:17-37
+85            <!-- Advertise basic in-call UI capability (Android 12+) -->
+86            <meta-data
+86-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:71:13-73:40
+87                android:name="android.telecom.IN_CALL_SERVICE_UI"
+87-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:72:17-66
+88                android:value="true" />
+88-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:73:17-37
+89            <!-- Call streaming support (set to false unless app supports it) -->
+90            <meta-data
+90-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:75:13-77:41
+91                android:name="android.telecom.IN_CALL_SERVICE_SUPPORTS_CALL_STREAMING"
+91-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:76:17-87
+92                android:value="false" />
+92-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:77:17-38
+93            <!-- Video calling support (Android 12-14) -->
+94            <meta-data
+94-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:79:13-81:41
+95                android:name="android.telecom.IN_CALL_SERVICE_SUPPORTS_VIDEO_CALLING"
+95-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:80:17-86
+96                android:value="false" />
+96-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:81:17-38
+97            <!-- Intent filter for InCallService binding -->
+98            <intent-filter>
+98-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:83:13-85:29
+99                <action android:name="android.telecom.InCallService" />
+99-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:84:17-72
+99-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:84:25-69
+100            </intent-filter>
+101        </service>
+102
+103        <!-- Call Screening Service (for spam detection / call blocking) -->
+104        <service
+104-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:89:9-98:19
+105            android:name="com.fayyaztech.dialer_core.services.CallScreeningService"
+105-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:90:13-84
+106            android:exported="true"
+106-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:93:13-36
+107            android:permission="android.permission.BIND_SCREENING_SERVICE"
+107-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:92:13-75
+108            tools:ignore="ExportedService"
+108-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:94:13-43
+109            tools:targetApi="31" >
+109-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:91:13-33
+110            <intent-filter>
+110-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:95:13-97:29
+111                <action android:name="android.telecom.CallScreeningService" />
+111-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:96:17-79
+111-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:96:25-76
+112            </intent-filter>
+113        </service>
+114
+115        <!-- Incoming Call Receiver (handles PHONE_STATE broadcasts) -->
+116        <receiver
+116-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:101:9-108:20
+117            android:name="com.fayyaztech.dialer_core.services.IncomingCallReceiver"
+117-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:102:13-84
+118            android:enabled="true"
+118-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:103:13-35
+119            android:exported="false" >
+119-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:104:13-37
+120            <intent-filter android:priority="100" >
+120-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:105:13-107:29
+120-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:105:28-50
+121                <action android:name="android.intent.action.PHONE_STATE" />
+121-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:106:17-76
+121-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:106:25-73
+122            </intent-filter>
+123        </receiver>
+124
+125        <!-- Call Action Receiver (handles notification actions: accept/reject/hangup) -->
+126        <receiver
+126-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:111:9-115:20
+127            android:name="com.fayyaztech.dialer_core.services.CallActionReceiver"
+127-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:112:13-82
+128            android:enabled="true"
+128-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:113:13-35
+129            android:exported="false" >
+129-->/home/sycet-pc/AndroidStudioProjects/dialer-core-repo/dialer-core/src/main/AndroidManifest.xml:114:13-37
+130        </receiver>
+131    </application>
+132
+133</manifest>
