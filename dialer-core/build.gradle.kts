@@ -41,7 +41,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
-    
+
     // Jetpack Compose dependencies for CallScreenActivity UI
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -51,13 +51,13 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation("androidx.compose.material:material-icons-extended:1.7.5")
-    
+
     // Material Components (View-system) for compatibility
     implementation("com.google.android.material:material:1.9.0")
-    
+
     // Phone number utilities for formatting and parsing
     implementation("com.googlecode.libphonenumber:libphonenumber:8.13.20")
-    
+
     // Testing dependencies
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
