@@ -17,6 +17,10 @@ import android.telecom.Call
 import android.telecom.DisconnectCause
 import android.telecom.InCallService
 import android.util.Log
+import android.Manifest
+import android.content.pm.PackageManager
+import android.provider.ContactsContract
+import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import com.fayyaztech.dialer_core.ui.call.CallScreenActivity
 
@@ -500,9 +504,12 @@ class DefaultInCallService : InCallService() {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
 
+        val phoneNumber = call.details.handle?.schemeSpecificPart ?: "Unknown"
+        val contactName = getContactName(phoneNumber) ?: phoneNumber
+
         val caller =
                 Person.Builder()
-                        .setName(call.details.handle?.schemeSpecificPart ?: "Unknown")
+                        .setName(contactName)
                         .build()
 
         val notification =
@@ -524,7 +531,7 @@ class DefaultInCallService : InCallService() {
                     NotificationCompat.Builder(this, "call_channel")
                             .setSmallIcon(android.R.drawable.sym_call_incoming)
                             .setContentTitle("Incoming Call")
-                            .setContentText(call.details.handle?.schemeSpecificPart ?: "Unknown")
+                            .setContentText(contactName)
                             .addAction(
                                     android.R.drawable.ic_menu_close_clear_cancel,
                                     "Reject",
@@ -575,9 +582,12 @@ class DefaultInCallService : InCallService() {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
 
+        val phoneNumber = call.details.handle?.schemeSpecificPart ?: "Unknown"
+        val contactName = getContactName(phoneNumber) ?: phoneNumber
+
         val caller =
                 Person.Builder()
-                        .setName(call.details.handle?.schemeSpecificPart ?: "Unknown")
+                        .setName(contactName)
                         .build()
 
         val notification =
@@ -597,7 +607,9 @@ class DefaultInCallService : InCallService() {
                     NotificationCompat.Builder(this, "call_channel")
                             .setSmallIcon(android.R.drawable.sym_call_outgoing)
                             .setContentTitle("Ongoing Call")
-                            .setContentText(call.details.handle?.schemeSpecificPart ?: "Unknown")
+                            .setContentText(contactName)
+                            .setUsesChronometer(true)
+                            .setWhen(call.details.connectTimeMillis)
                             .setContentIntent(returnPendingIntent)
                             .addAction(
                                     android.R.drawable.ic_menu_close_clear_cancel,
@@ -788,5 +800,36 @@ class DefaultInCallService : InCallService() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start/update call screen", e)
         }
+    }
+
+    private fun getContactName(phoneNumber: String): String? {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return null
+        }
+
+        val uri =
+            ContactsContract.PhoneLookup.CONTENT_FILTER_URI
+                .buildUpon()
+                .appendPath(phoneNumber)
+                .build()
+
+        var contactName: String? = null
+        val cursor = contentResolver.query(
+            uri,
+            arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME),
+            null,
+            null,
+            null
+        )
+
+        cursor?.use {
+            if (it.moveToFirst()) {
+                contactName = it.getString(0)
+            }
+        }
+
+        return contactName
     }
 }
