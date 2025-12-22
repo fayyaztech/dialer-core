@@ -7,7 +7,11 @@ A reusable Android library module that provides core telephony/dialer functional
 
 ## Overview
 
-`dialer-core` handles all the complex Android Telecom framework integration, call management, and in-call UI, allowing you to focus on building custom contacts, call history, and dialpad screens for your dialer app.
+`dialer-core` handles all the complex Android Telecom framework integration, call management, and in-call UI, allowing you to focus on building custom contacts, call history, and dialpad screens for your dialer app. This module is designed to make it incredibly easy to build professional dialer applications with minimal effort.
+
+### Roadmap 🚀
+- [ ] Flutter implementation (Planned)
+- [ ] iOS Core (Future consideration)
 
 ### What's Included
 
@@ -228,7 +232,8 @@ See [LICENSE](LICENSE) for full details.
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/fayyaztech-sycet/dialer-core/issues)
+- **Github**: [fayyaztech](https://github.com/fayyaztech)
+- **Issues**: [GitHub Issues](https://github.com/sycet-erp/dialer-core/issues)
 - **Email**: support@fayyaztech.com
 
 ## Related Projects
@@ -237,4 +242,4 @@ See [LICENSE](LICENSE) for full details.
 
 ---
 
-**Made with ❤️ by Fayyaz Tech**
+**Made with ❤️ by [FayyazTech](https://github.com/fayyaztech)**

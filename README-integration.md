@@ -13,6 +13,7 @@ The `dialer-core` module provides:
 - **Advanced Multi-Call Support**: Conference calling with automatic state recovery, selection-based swapping, and intelligent focus management.
 - **Lock Screen Support**: Full-screen intent for incoming calls, screen management with proximity sensor
 - **OEM Compatibility**: Tested workarounds for Samsung, Xiaomi, and other OEM-specific issues
+- **Future Ready**: Roadmap includes Flutter support and cross-platform extensions.
 
 ## Architecture
 
@@ -521,5 +522,9 @@ This module is part of the DefaultDialer project.
 For issues, questions, or contributions related to the dialer-core module, please refer to the main project repository.
 
 ---
+
+---
+
+**Maintained by [FayyazTech](https://github.com/fayyaztech)**
 
 **Note**: This is a reusable module designed for integration into multiple dialer applications. The main app module (containing contacts, dialpad, history screens) is kept separate for easy customization per app.
