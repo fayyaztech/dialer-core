@@ -579,19 +579,6 @@ class CallScreenActivity : ComponentActivity() {
 
         Log.d("CallScreenActivity", "endCall requested. Other calls: ${otherCalls.size}")
 
-        try {
-            // Reset audio settings when ending call
-            audioManager.mode = AudioManager.MODE_NORMAL
-            @Suppress("DEPRECATION") audioManager.isSpeakerphoneOn = false
-            audioManager.isMicrophoneMute = false
-            // release any audio focus we might have acquired
-            abandonAudioFocusIfNeeded()
-            // release proximity wake lock
-            releaseProximityWakeLock()
-        } catch (e: Exception) {
-            Log.w("CallScreenActivity", "Failed to reset audio settings", e)
-        }
-
         // Try multiple methods to disconnect the call
         var disconnected = false
 
@@ -804,8 +791,8 @@ class CallScreenActivity : ComponentActivity() {
             try {
                 val calls = DefaultInCallService.getAllCalls()
                 allCallsState.value = calls
-                val activeCallsCount = calls.filter { it.state == Call.STATE_ACTIVE || it.state == Call.STATE_DIALING || it.state == Call.STATE_CONNECTING }.size
-                callCountState.value = maxOf(activeCallsCount, 1)
+                val totalCalls = calls.size
+                callCountState.value = maxOf(totalCalls, 1)
 
                 // Check if merge is actually available based on proper conditions
                 canMergeState.value = canMergeCalls()
@@ -815,7 +802,7 @@ class CallScreenActivity : ComponentActivity() {
 
                 Log.d(
                         "CallScreenActivity",
-                        "Active calls: $activeCallsCount, total: ${calls.size}, canMerge: ${canMergeState.value}, canSwap: ${canSwapState.value}"
+                        "Call updates - total: ${calls.size}, canMerge: ${canMergeState.value}, canSwap: ${canSwapState.value}"
                 )
             } catch (e: Exception) {
                 Log.w("CallScreenActivity", "Failed to get call count: ${e.message}")
@@ -1018,33 +1005,40 @@ class CallScreenActivity : ComponentActivity() {
     private fun onMerge() {
         Log.d("CallScreenActivity", "Merge/conference requested")
         
-        try {
-            val calls = DefaultInCallService.getAllCalls()
-            val activeCall = calls.firstOrNull { it.state == Call.STATE_ACTIVE }
-            val holdingCall = calls.firstOrNull { it.state == Call.STATE_HOLDING }
-            
-            if (activeCall == null || holdingCall == null) {
-                showSnackbar("Need an active and a held call to merge")
-                return
+        lifecycleScope.launch {
+            try {
+                val calls = DefaultInCallService.getAllCalls()
+                val activeCall = calls.firstOrNull { it.state == Call.STATE_ACTIVE }
+                val holdingCall = calls.firstOrNull { it.state == Call.STATE_HOLDING }
+                
+                if (activeCall == null || holdingCall == null) {
+                    showSnackbar("Need an active and a held call to merge")
+                    return@launch
+                }
+                
+                // Perform conference
+                try {
+                    activeCall.conference(holdingCall)
+                    showSnackbar("Merging calls...")
+                } catch (e: Exception) {
+                    Log.e("CallScreenActivity", "Primary conference command failed", e)
+                    // Fallback: try unholding both first (some carriers require this)
+                    try {
+                        activeCall.unhold()
+                        holdingCall.unhold()
+                        delay(300)
+                        activeCall.conference(holdingCall)
+                    } catch (e2: Exception) {
+                        Log.e("CallScreenActivity", "Fallback conference failed", e2)
+                        showSnackbar("Merge failed: ${e.message}")
+                    }
+                }
+                
+                Log.d("CallScreenActivity", "Merge/conference request sent")
+            } catch (e: Exception) {
+                Log.e("CallScreenActivity", "Failed to perform merge", e)
+                showSnackbar("Merge failed: ${e.message}")
             }
-            
-            // Per user request: check if mergeable
-            val canMerge = activeCall.details.can(Call.Details.CAPABILITY_MERGE_CONFERENCE) ||
-                          activeCall.details.can(Call.Details.CAPABILITY_MANAGE_CONFERENCE)
-            
-            if (!canMerge) {
-                showSnackbar("Merge not supported by carrier")
-                // Still try to conference as some carriers don't report capability correctly
-                activeCall.conference(holdingCall)
-            } else {
-                activeCall.conference(holdingCall)
-                showSnackbar("Merging calls...")
-            }
-            
-            Log.d("CallScreenActivity", "Merge/conference request sent")
-        } catch (e: Exception) {
-            Log.e("CallScreenActivity", "Failed to perform merge", e)
-            showSnackbar("Merge failed: ${e.message}")
         }
     }
 
@@ -1634,7 +1628,7 @@ fun CallScreen(
                         )
 
                         // Merge button (when available)
-                        if (callCount >= 2 && canMerge) {
+                        if (canMerge) {
                             ModernCallButton(
                                 onClick = onMerge,
                                 icon = Icons.Default.Call,
