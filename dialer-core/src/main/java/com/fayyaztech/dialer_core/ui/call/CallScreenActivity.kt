@@ -59,6 +59,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,10 +68,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
+import androidx.lifecycle.lifecycleScope
 import com.fayyaztech.dialer_core.services.DefaultInCallService
 import com.fayyaztech.dialer_core.ui.theme.DefaultDialerTheme
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.RepeatMode
@@ -100,7 +103,7 @@ import androidx.compose.animation.ExperimentalAnimationApi
 class CallScreenActivity : ComponentActivity() {
 
     private var currentCall: Call? = null
-    private var isFinishing = false
+    private var isEndingCall = false
     private val phoneNumberState = mutableStateOf("Unknown")
     private val callStateState = mutableStateOf("Unknown")
     private val canConferenceState = mutableStateOf(false)
@@ -111,6 +114,9 @@ class CallScreenActivity : ComponentActivity() {
     private val audioState = mutableStateOf<CallAudioState?>(null)
     private val handler = Handler(Looper.getMainLooper())
     private var showKeypad by mutableStateOf(false)
+    private val snackbarHostState = mutableStateOf(androidx.compose.material3.SnackbarHostState())
+    private var isReceiverRegistered = false
+    private val allCallsState = mutableStateOf<List<Call>>(emptyList())
 
     private val audioStateReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -128,20 +134,12 @@ class CallScreenActivity : ComponentActivity() {
     }
 
     companion object {
-        private var isActivityRunning = false
         const val EXTRA_CAN_CONFERENCE = "CAN_CONFERENCE"
         const val EXTRA_CAN_MERGE = "CAN_MERGE"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Prevent multiple instances
-        if (isActivityRunning) {
-            finish()
-            return
-        }
-        isActivityRunning = true
 
         // Set up window flags to show over lock screen and turn screen on
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -195,6 +193,7 @@ class CallScreenActivity : ComponentActivity() {
         } else {
             registerReceiver(audioStateReceiver, filter)
         }
+        isReceiverRegistered = true
 
         setContent {
             DefaultDialerTheme {
@@ -219,14 +218,17 @@ class CallScreenActivity : ComponentActivity() {
                             isOnHold = isOnHoldState.value,
                             onToggleHold = { toggleHold() },
                             onConference = { onConference() },
-                            onMerge = { onMerge() },
-                            onSwapCalls = { onSwapCalls() },
-                            onAddCall = { onAddCall() },
-                            onSendDtmf = { digit -> sendDtmf(digit) },
-                            showKeypad = showKeypad,
-                            onToggleKeypad = { showKeypad = !showKeypad },
-                            getContactName = { number -> getContactName(number) }
-                    )
+                             onMerge = { onMerge() },
+                             onSwapCalls = { onSwapCalls() },
+                             onSwapToCall = { targetCall -> onSwapToCall(targetCall) },
+                             allCalls = allCallsState.value,
+                             onAddCall = { onAddCall() },
+                             onSendDtmf = { digit -> sendDtmf(digit) },
+                             showKeypad = showKeypad,
+                             onToggleKeypad = { showKeypad = !showKeypad },
+                             getContactName = { number -> getContactName(number) },
+                             snackbarHostState = snackbarHostState.value
+                     )
                 }
             }
         }
@@ -493,7 +495,7 @@ class CallScreenActivity : ComponentActivity() {
                             updateCallCount()
 
                             // Only call endCall if we're not already finishing
-                            if (!isFinishing) {
+                            if (!isEndingCall && !isFinishing) {
                                 handler.postDelayed({ endCall() }, 100)
                             }
                         }
@@ -522,13 +524,18 @@ class CallScreenActivity : ComponentActivity() {
     }
 
     private fun rejectCall() {
-        if (isFinishing) return
-        isFinishing = true
-
+        if (isEndingCall || isFinishing) return
+        
+        // If there are other calls, don't finish yet
+        val otherCalls = DefaultInCallService.getAllCalls().filter { 
+            it.state != Call.STATE_DISCONNECTED && it.state != Call.STATE_DISCONNECTING && it != currentCall
+        }
+        
+        Log.d("CallScreenActivity", "Rejecting call. Other calls: ${otherCalls.size}")
+        
         Log.d("CallScreenActivity", "Attempting to reject call")
-
+        
         var rejected = false
-
         // Try to reject the call
         try {
             currentCall?.let {
@@ -540,38 +547,37 @@ class CallScreenActivity : ComponentActivity() {
             Log.e("CallScreenActivity", "Failed to reject call", e)
         }
 
-        // If reject failed, try disconnect
+        // If reject failed, try disconnect as fallback
         if (!rejected) {
             try {
                 currentCall?.disconnect()
-                Log.d("CallScreenActivity", "Call.disconnect() called as fallback")
+                Log.d("CallScreenActivity", "Call.disconnect() called as fallback in rejectCall")
             } catch (e: Exception) {
-                Log.e("CallScreenActivity", "Failed to disconnect call", e)
+                Log.e("CallScreenActivity", "Failed fallback disconnect in rejectCall", e)
             }
         }
 
-        // Delay before finishing
-        handler.postDelayed({ finish() }, 200)
+        if (otherCalls.isEmpty()) {
+            isEndingCall = true
+            Log.d("CallScreenActivity", "Rejecting last call, finishing activity")
+            handler.postDelayed({
+                if (!isFinishing) finish()
+            }, 200)
+        } else {
+            Log.d("CallScreenActivity", "Rejected call but ${otherCalls.size} calls remain. Staying.")
+            updateCallCount()
+        }
     }
 
     private fun endCall() {
-        if (isFinishing) return
-        isFinishing = true
-
-        Log.d("CallScreenActivity", "Attempting to end call")
-
-        try {
-            // Reset audio settings when ending call
-            audioManager.mode = AudioManager.MODE_NORMAL
-            @Suppress("DEPRECATION") audioManager.isSpeakerphoneOn = false
-            audioManager.isMicrophoneMute = false
-            // release any audio focus we might have acquired
-            abandonAudioFocusIfNeeded()
-            // release proximity wake lock
-            releaseProximityWakeLock()
-        } catch (e: Exception) {
-            Log.w("CallScreenActivity", "Failed to reset audio settings", e)
+        if (isEndingCall || isFinishing) return
+        
+        // Exclude the current call from others check to allow ending it even if it's the only one
+        val otherCalls = DefaultInCallService.getAllCalls().filter { 
+            it.state != Call.STATE_DISCONNECTED && it.state != Call.STATE_DISCONNECTING && it != currentCall
         }
+
+        Log.d("CallScreenActivity", "endCall requested. Other calls: ${otherCalls.size}")
 
         // Try multiple methods to disconnect the call
         var disconnected = false
@@ -616,24 +622,53 @@ class CallScreenActivity : ComponentActivity() {
                                     android.telecom.TelecomManager
                     telecomManager?.endCall()
                     Log.d("CallScreenActivity", "TelecomManager.endCall() called")
+                    disconnected = true
                 }
             } catch (e: Exception) {
                 Log.e("CallScreenActivity", "Failed to end call via TelecomManager", e)
             }
         }
 
-        // Give the disconnect a moment to process before finishing
-        handler.postDelayed(
-                {
-                    // Use finishAndRemoveTask to completely close and remove from recents
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        finishAndRemoveTask()
-                    } else {
-                        finish()
-                    }
-                },
-                200
-        )
+        if (otherCalls.isEmpty()) {
+            isEndingCall = true
+            Log.d("CallScreenActivity", "All calls ended, finishing activity")
+            // Reset audio settings when ending call
+            try {
+                audioManager.mode = AudioManager.MODE_NORMAL
+                @Suppress("DEPRECATION") audioManager.isSpeakerphoneOn = false
+                audioManager.isMicrophoneMute = false
+                abandonAudioFocusIfNeeded()
+                releaseProximityWakeLock()
+            } catch (e: Exception) {
+                Log.w("CallScreenActivity", "Failed to reset audio settings on finish", e)
+            }
+
+            // Give the disconnect a moment to process before finishing
+            handler.postDelayed(
+                    {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            finishAndRemoveTask()
+                        } else {
+                            finish()
+                        }
+                    },
+                    200
+            )
+        } else {
+            Log.d("CallScreenActivity", "Call ended but ${otherCalls.size} calls remain. Staying open.")
+            // If the current call ended, we might want to switch focus to another remaining call
+            handler.postDelayed({ 
+                val nextCall = DefaultInCallService.getAllCalls().firstOrNull { 
+                    it.state != Call.STATE_DISCONNECTED && it.state != Call.STATE_DISCONNECTING 
+                }
+                if (nextCall != null && nextCall != currentCall) {
+                    Log.d("CallScreenActivity", "Switching focus to next available call")
+                    onSwapToCall(nextCall)
+                } else {
+                    updateCallCount()
+                }
+            }, 300)
+        }
     }
 
     private fun toggleMute() {
@@ -754,8 +789,10 @@ class CallScreenActivity : ComponentActivity() {
     private fun updateCallCount() {
         handler.post {
             try {
-                val activeCallCount = DefaultInCallService.getActiveCallCount()
-                callCountState.value = maxOf(activeCallCount, 1)
+                val calls = DefaultInCallService.getAllCalls()
+                allCallsState.value = calls
+                val totalCalls = calls.size
+                callCountState.value = maxOf(totalCalls, 1)
 
                 // Check if merge is actually available based on proper conditions
                 canMergeState.value = canMergeCalls()
@@ -765,7 +802,7 @@ class CallScreenActivity : ComponentActivity() {
 
                 Log.d(
                         "CallScreenActivity",
-                        "Active calls: $activeCallCount, canMerge: ${canMergeState.value}, canSwap: ${canSwapState.value}"
+                        "Call updates - total: ${calls.size}, canMerge: ${canMergeState.value}, canSwap: ${canSwapState.value}"
                 )
             } catch (e: Exception) {
                 Log.w("CallScreenActivity", "Failed to get call count: ${e.message}")
@@ -786,24 +823,17 @@ class CallScreenActivity : ComponentActivity() {
         try {
             val calls = DefaultInCallService.getAllCalls()
             
-            // Condition 1: Exactly 2 calls
-            if (calls.size != 2) {
-                Log.d("CallScreenActivity", "canMergeCalls: Call count is ${calls.size}, need exactly 2")
+            // Condition 1: At least 2 calls
+            if (calls.size < 2) {
+                Log.d("CallScreenActivity", "canMergeCalls: Need at least 2 calls, have ${calls.size}")
                 return false
             }
             
-            // Condition 2 & 3: Find active and holding calls, check capability
-            var activeCall: Call? = null
-            var holdingCall: Call? = null
+            // Condition 2: Find active and holding calls
+            val activeCall = calls.find { it.state == Call.STATE_ACTIVE }
+            val holdingCall = calls.find { it.state == Call.STATE_HOLDING }
             
-            for (call in calls) {
-                when (call.state) {
-                    Call.STATE_ACTIVE -> activeCall = call
-                    Call.STATE_HOLDING -> holdingCall = call
-                }
-            }
-            
-            // Must have exactly one active and one holding call
+            // Must have at least one active and one holding call to merge
             if (activeCall == null || holdingCall == null) {
                 Log.d(
                     "CallScreenActivity",
@@ -812,14 +842,15 @@ class CallScreenActivity : ComponentActivity() {
                 return false
             }
             
-            // Active call must have merge capability (0x00000004)
+            // Active call must have merge capability (some carriers might not show this, but we check anyway)
             val hasMergeCapability = activeCall.details.can(Call.Details.CAPABILITY_MERGE_CONFERENCE)
             Log.d(
                 "CallScreenActivity",
                 "canMergeCalls: Active call merge capability: $hasMergeCapability"
             )
             
-            return hasMergeCapability
+            // Even if capability is false, we can try to show it if there are 2+ calls as per user request
+            return true 
         } catch (e: Exception) {
             Log.w("CallScreenActivity", "canMergeCalls failed: ${e.message}", e)
             return false
@@ -876,6 +907,8 @@ class CallScreenActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        Log.d("CallScreenActivity", "onDestroy - cleaning up resources")
+        
         // ensure audio is returned to normal when the activity is destroyed
         try {
             audioManager.mode = AudioManager.MODE_NORMAL
@@ -888,16 +921,18 @@ class CallScreenActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.w("CallScreenActivity", "Failed to reset audio manager on destroy", e)
         }
-        currentCall?.unregisterCallback(callCallback)
-        isActivityRunning = false
-        isFinishing = false
-        Log.d("CallScreenActivity", "Activity destroyed and cleaned up")
-        super.onDestroy()
+        
         try {
-            unregisterReceiver(audioStateReceiver)
+            currentCall?.unregisterCallback(callCallback)
+            if (isReceiverRegistered) {
+                unregisterReceiver(audioStateReceiver)
+                isReceiverRegistered = false
+            }
         } catch (e: Exception) {
-            Log.w("CallScreenActivity", "Failed to unregister audio receiver", e)
+            Log.w("CallScreenActivity", "Failed to unregister callbacks", e)
         }
+        
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -919,16 +954,28 @@ class CallScreenActivity : ComponentActivity() {
         canMergeState.value = newCanMerge
 
         // Update the UI with new call information
-        callCallback?.let { currentCall?.unregisterCallback(it) }
+        val previousCall = currentCall
         currentCall = DefaultInCallService.currentCall
-
-        // Refresh phone number preference (prefer currentCall details over intent extras)
+        
+        // CRITICAL: Immediately update the phone number and state variables for the new call
         refreshPhoneNumberFromCallOrIntent()
+        callStateState.value = newCallState
+        
+        if (previousCall != currentCall) {
+            previousCall?.unregisterCallback(callCallback)
+            currentCall?.registerCallback(callCallback)
+            Log.d("CallScreenActivity", "Switched currentCall from $previousCall to $currentCall")
+        }
 
-        callCallback?.let { currentCall?.registerCallback(it) }
-
-        // Reset finishing flag to allow new call handling
-        isFinishing = false
+        updateCallCount()
+ 
+        // Reset ending flag if we are getting a new valid call
+        isEndingCall = false
+        
+        // Show snackbar if we are switching to a new incoming/active call
+        if (newCallState.contains("Incoming", ignoreCase = true) || newCallState.contains("Dialing", ignoreCase = true)) {
+            showSnackbar("Focusing on new call: $newPhoneNumber")
+        }
     }
 
     // Conference action — placeholder (logs only). Real conference/merge requires telecom provider
@@ -956,37 +1003,42 @@ class CallScreenActivity : ComponentActivity() {
     }
 
     private fun onMerge() {
-        Log.d("CallScreenActivity", "Merge action requested")
+        Log.d("CallScreenActivity", "Merge/conference requested")
         
-        // Validate merge conditions before attempting
-        if (!canMergeCalls()) {
-            Log.d("CallScreenActivity", "Merge conditions not met")
-            return
-        }
-        
-        try {
-            val calls = DefaultInCallService.getAllCalls()
-            
-            // Find the active and holding calls
-            val activeCall = calls.firstOrNull { it.state == Call.STATE_ACTIVE }
-            val holdingCall = calls.firstOrNull { it.state == Call.STATE_HOLDING }
-            
-            if (activeCall == null || holdingCall == null) {
-                Log.e("CallScreenActivity", "Could not find active and holding calls")
-                return
+        lifecycleScope.launch {
+            try {
+                val calls = DefaultInCallService.getAllCalls()
+                val activeCall = calls.firstOrNull { it.state == Call.STATE_ACTIVE }
+                val holdingCall = calls.firstOrNull { it.state == Call.STATE_HOLDING }
+                
+                if (activeCall == null || holdingCall == null) {
+                    showSnackbar("Need an active and a held call to merge")
+                    return@launch
+                }
+                
+                // Perform conference
+                try {
+                    activeCall.conference(holdingCall)
+                    showSnackbar("Merging calls...")
+                } catch (e: Exception) {
+                    Log.e("CallScreenActivity", "Primary conference command failed", e)
+                    // Fallback: try unholding both first (some carriers require this)
+                    try {
+                        activeCall.unhold()
+                        holdingCall.unhold()
+                        delay(300)
+                        activeCall.conference(holdingCall)
+                    } catch (e2: Exception) {
+                        Log.e("CallScreenActivity", "Fallback conference failed", e2)
+                        showSnackbar("Merge failed: ${e.message}")
+                    }
+                }
+                
+                Log.d("CallScreenActivity", "Merge/conference request sent")
+            } catch (e: Exception) {
+                Log.e("CallScreenActivity", "Failed to perform merge", e)
+                showSnackbar("Merge failed: ${e.message}")
             }
-            
-            Log.d(
-                "CallScreenActivity",
-                "Attempting to conference active call with holding call"
-            )
-            
-            // Conference the active call with the holding call
-            activeCall.conference(holdingCall)
-            
-            Log.d("CallScreenActivity", "Merge/conference request sent")
-        } catch (e: Exception) {
-            Log.e("CallScreenActivity", "Failed to perform merge", e)
         }
     }
 
@@ -994,46 +1046,110 @@ class CallScreenActivity : ComponentActivity() {
         Log.d("CallScreenActivity", "Swap calls requested")
         
         if (!canSwapCalls()) {
-            Log.d("CallScreenActivity", "Swap conditions not met")
+            showSnackbar("Swap not available")
             return
         }
         
         try {
             val calls = DefaultInCallService.getAllCalls()
-            
-            // Find active and holding calls
-            val activeCall = calls.firstOrNull { it.state == Call.STATE_ACTIVE }
-            val holdingCall = calls.firstOrNull { it.state == Call.STATE_HOLDING }
-            
-            Log.d(
-                "CallScreenActivity",
-                "Swapping - Active: ${activeCall != null}, Holding: ${holdingCall != null}"
-            )
-            
-            // Hold the active call (if exists)
-            activeCall?.hold()
-            
-            // Unhold the holding call (if exists)
-            holdingCall?.unhold()
+            val activeCall = calls.find { it.state == Call.STATE_ACTIVE }
+            val holdingCall = calls.find { it.state == Call.STATE_HOLDING }
+
+            // Reliable sequence: Hold active, then unhold the target.
+            if (activeCall != null && holdingCall != null) {
+                showSnackbar("Swapping to ${phoneNumberState.value}...")
+                
+                // 1. Hold active first
+                activeCall.hold()
+                
+                // 2. Small delay before unholding the next one to avoid telecom racing
+                handler.postDelayed({
+                    holdingCall.unhold()
+                    
+                    // 3. Update focus AFTER unhold request
+                    currentCall = holdingCall
+                    DefaultInCallService.currentCall = holdingCall
+                    refreshPhoneNumberFromCallOrIntent()
+                    updateCallCount()
+                }, 300)
+            } else if (holdingCall != null) {
+                currentCall = holdingCall
+                DefaultInCallService.currentCall = holdingCall
+                refreshPhoneNumberFromCallOrIntent()
+                updateCallCount()
+                
+                showSnackbar("Resuming ${phoneNumberState.value}...")
+                holdingCall.unhold()
+            }
             
             Log.d("CallScreenActivity", "Swap request sent")
         } catch (e: Exception) {
             Log.e("CallScreenActivity", "Failed to swap calls", e)
+            showSnackbar("Swap failed")
         }
     }
 
 
+    private fun onSwapToCall(targetCall: Call) {
+        if (targetCall == currentCall && targetCall.state == Call.STATE_ACTIVE) {
+            showSnackbar("Call is already active")
+            return
+        }
+
+        Log.d("CallScreenActivity", "Swapping to specific call: $targetCall")
+        try {
+            val calls = DefaultInCallService.getAllCalls()
+            val activeCall = calls.find { it.state == Call.STATE_ACTIVE }
+            
+            // 1. Hold active call if it's not the target
+            if (activeCall != null && activeCall != targetCall) {
+                activeCall.hold()
+                Log.d("CallScreenActivity", "Holding active call before swap")
+            }
+            
+            // 2. Delay unhold to let telecom process the hold
+            handler.postDelayed({
+                targetCall.unhold()
+                
+                // 3. Update UI focus
+                currentCall = targetCall
+                DefaultInCallService.currentCall = targetCall
+                refreshPhoneNumberFromCallOrIntent()
+                updateCallCount()
+                
+                showSnackbar("Selected: ${phoneNumberState.value}")
+            }, 300)
+
+        } catch (e: Exception) {
+            Log.e("CallScreenActivity", "Failed to swap to call", e)
+            showSnackbar("Swap failed")
+        }
+    }
+
     private fun onAddCall() {
         Log.d("CallScreenActivity", "Add call action requested")
         try {
-            // Open main app to make a new call
-            val dialerIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                putExtra("SHOW_DIALER", true)
+            // Use ACTION_DIAL to reliably open the dialer
+            val dialIntent = Intent(Intent.ACTION_DIAL).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            dialerIntent?.let { startActivity(it) }
+            startActivity(dialIntent)
+            
+            // Also show snackbar to inform user
+            showSnackbar("Opening dialer to add call...")
         } catch (e: Exception) {
             Log.e("CallScreenActivity", "Failed to open dialer for add call", e)
+            showSnackbar("Could not open dialer")
+        }
+    }
+
+    private fun showSnackbar(message: String) {
+        lifecycleScope.launch {
+            try {
+                snackbarHostState.value.showSnackbar(message)
+            } catch (e: Exception) {
+                Log.w("CallScreenActivity", "Failed to show snackbar: ${e.message}")
+            }
         }
     }
 }
@@ -1071,19 +1187,24 @@ fun CallScreen(
     onConference: () -> Unit = {},
     onMerge: () -> Unit = {},
     onSwapCalls: () -> Unit = {},
+    onSwapToCall: (Call) -> Unit = {},
+    allCalls: List<Call> = emptyList(),
     onAddCall: () -> Unit = {},
     onSendDtmf: (Char) -> Unit = {},
     showKeypad: Boolean,
     onToggleKeypad: () -> Unit,
-    getContactName: (String) -> String?
+    getContactName: (String) -> String?,
+    snackbarHostState: androidx.compose.material3.SnackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
 ) {
-    var callState by remember { mutableStateOf(initialCallState) }
-    var elapsedTime by remember { mutableLongStateOf(0L) }
-    var isActive by remember {
+    val coroutineScope = rememberCoroutineScope()
+    var callState by remember(call) { mutableStateOf(initialCallState) }
+    var elapsedTime by remember(call) { mutableLongStateOf(0L) }
+    var isActive by remember(call) {
         mutableStateOf(initialCallState.contains("Active", ignoreCase = true))
     }
     var isMuted by remember { mutableStateOf(false) }
     var showAudioRouteMenu by remember { mutableStateOf(false) }
+    var showSwapMenu by remember { mutableStateOf(false) }
     
     // Determine current audio route and available routes
     val currentRoute = audioState?.route ?: CallAudioState.ROUTE_EARPIECE
@@ -1092,7 +1213,7 @@ fun CallScreen(
     val isSpeakerOn = currentRoute == CallAudioState.ROUTE_SPEAKER
     val isBluetoothOn = currentRoute == CallAudioState.ROUTE_BLUETOOTH
     
-    var isRinging by remember {
+    var isRinging by remember(call) {
         mutableStateOf(
             initialCallState.contains("Incoming", ignoreCase = true) ||
             initialCallState.contains("Ringing", ignoreCase = true)
@@ -1507,7 +1628,7 @@ fun CallScreen(
                         )
 
                         // Merge button (when available)
-                        if (callCount >= 2 && canMerge) {
+                        if (canMerge) {
                             ModernCallButton(
                                 onClick = onMerge,
                                 icon = Icons.Default.Call,
@@ -1522,16 +1643,57 @@ fun CallScreen(
 
                         // Swap button (when available)
                         if (canSwap) {
-                            ModernCallButton(
-                                onClick = onSwapCalls,
-                                icon = Icons.Default.SwapVert,
-                                iconColor = Color(0xFF8F9BB3),
-                                backgroundColor = Color.Transparent,
-                                size = 40.dp,
-                                label = "Swap",
-                                iconSize = 20.dp,
-                                showBackground = false
-                            )
+                            Box {
+                                ModernCallButton(
+                                    onClick = {
+                                        if (allCalls.size >= 2) {
+                                            showSwapMenu = true
+                                        } else {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("No other calls to swap to")
+                                            }
+                                        }
+                                    },
+                                    icon = Icons.Default.SwapVert,
+                                    iconColor = Color(0xFF8F9BB3),
+                                    backgroundColor = Color.Transparent,
+                                    size = 40.dp,
+                                    label = "Swap",
+                                    iconSize = 20.dp,
+                                    showBackground = false
+                                )
+
+                                DropdownMenu(
+                                    expanded = showSwapMenu,
+                                    onDismissRequest = { showSwapMenu = false },
+                                    modifier = Modifier.background(surfaceColor)
+                                ) {
+                                    allCalls.forEach { remoteCall ->
+                                        val number = remoteCall.details.handle?.schemeSpecificPart ?: "Unknown"
+                                        val name = getContactName(number) ?: number
+                                        val status = when (remoteCall.state) {
+                                            Call.STATE_ACTIVE -> "Active"
+                                            Call.STATE_HOLDING -> "On Hold"
+                                            Call.STATE_DIALING -> "Dialing"
+                                            Call.STATE_RINGING -> "Ringing"
+                                            else -> "Unknown"
+                                        }
+
+                                        DropdownMenuItem(
+                                            text = {
+                                                Column {
+                                                    Text(name, color = if (remoteCall.state == Call.STATE_ACTIVE) primaryColor else Color.White)
+                                                    Text(status, style = MaterialTheme.typography.bodySmall, color = Color(0xFF8F9BB3))
+                                                }
+                                            },
+                                            onClick = {
+                                                onSwapToCall(remoteCall)
+                                                showSwapMenu = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -1564,6 +1726,12 @@ fun CallScreen(
                 }
             }
         }
+
+        // Snackbar Host for feedback
+        androidx.compose.material3.SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 100.dp)
+        )
 
         // Modern keypad overlay
         if (showKeypad) {

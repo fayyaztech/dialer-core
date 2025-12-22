@@ -7,13 +7,17 @@ A reusable Android library module that provides core telephony/dialer functional
 
 ## Overview
 
-`dialer-core` handles all the complex Android Telecom framework integration, call management, and in-call UI, allowing you to focus on building custom contacts, call history, and dialpad screens for your dialer app.
+`dialer-core` handles all the complex Android Telecom framework integration, call management, and in-call UI, allowing you to focus on building custom contacts, call history, and dialpad screens for your dialer app. This module is designed to make it incredibly easy to build professional dialer applications with minimal effort.
+
+### Roadmap 🚀
+- [ ] Flutter implementation (Planned)
+- [ ] iOS Core (Future consideration)
 
 ### What's Included
 
-- ✅ Complete `InCallService` implementation
+- ✅ Complete `InCallService` implementation with Android 12+ `CallStyle`
 - ✅ Modern Jetpack Compose in-call UI with Material3
-- ✅ Multi-call support (hold, swap, merge, conference)
+- ✅ Multi-call support (hold, swap with selection menu, merge fallback)
 - ✅ Audio routing (earpiece, speaker, bluetooth)
 - ✅ Call screening framework
 - ✅ Lock screen support with full-screen incoming call UI
@@ -75,9 +79,9 @@ That's it! The module handles incoming calls, in-call UI, audio routing, and cal
 
 ### Multi-Call Operations
 - Hold and resume calls
-- Swap between multiple calls
-- Merge calls into conference
-- Add new call during active call
+- Swap between multiple calls with a **selection menu**
+- Intelligent merge/conference with **automatic state recovery**
+- "Add Call" with automatic focus and state management
 
 ### In-Call UI
 - Beautiful Material3 Compose design
@@ -228,7 +232,8 @@ See [LICENSE](LICENSE) for full details.
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/fayyaztech-sycet/dialer-core/issues)
+- **Github**: [fayyaztech](https://github.com/fayyaztech)
+- **Issues**: [GitHub Issues](https://github.com/sycet-erp/dialer-core/issues)
 - **Email**: support@fayyaztech.com
 
 ## Related Projects
@@ -237,4 +242,4 @@ See [LICENSE](LICENSE) for full details.
 
 ---
 
-**Made with ❤️ by Fayyaz Tech**
+**Made with ❤️ by [FayyazTech](https://github.com/fayyaztech)**

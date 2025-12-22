@@ -9,10 +9,11 @@ The `dialer-core` module provides:
 - **Complete Telecom Framework Integration**: InCallService, CallScreeningService, and call state management
 - **Modern In-Call UI**: Built with Jetpack Compose and Material3 design
 - **Call Management**: Audio routing (speaker/earpiece/bluetooth), mute, hold, merge, swap
-- **Notification Support**: Incoming call notifications with accept/reject actions, ongoing call notifications
-- **Multi-Call Support**: Conference calling, call merging, and call swapping
+- **Notification Support**: Android 12+ `CallStyle` notifications (non-dismissible), persistent across multi-call scenarios.
+- **Advanced Multi-Call Support**: Conference calling with automatic state recovery, selection-based swapping, and intelligent focus management.
 - **Lock Screen Support**: Full-screen intent for incoming calls, screen management with proximity sensor
 - **OEM Compatibility**: Tested workarounds for Samsung, Xiaomi, and other OEM-specific issues
+- **Future Ready**: Roadmap includes Flutter support and cross-platform extensions.
 
 ## Architecture
 
@@ -348,10 +349,10 @@ class CustomInCallService : com.fayyaztech.dialer_core.services.DefaultInCallSer
 
 The module handles audio routing robustly:
 
-- **Automatic Mode Management**: Sets `MODE_IN_COMMUNICATION` for reliable speaker/earpiece switching
-- **Audio Focus Handling**: Requests and manages audio focus with fallback strategies
-- **Bluetooth Support**: Detects and allows switching to bluetooth devices
-- **OEM Workarounds**: Includes workarounds for Samsung/Xiaomi audio routing issues
+- **Smart Mode Management**: Only resets audio mode to `NORMAL` when the *last* call is disconnected, preventing audio drops.
+- **Audio Focus Handling**: Non-blocking request/abandon logic with clear-down protection.
+- **Bluetooth Support**: Seamless switching between bluetooth, speaker, and earpiece.
+- **Carrier Compatibility**: Fallback strategies for merge/swap on sensitive networks.
 
 ### Proximity Sensor Integration
 
@@ -361,11 +362,11 @@ The module handles audio routing robustly:
 
 ### Multi-Call Support
 
-- **Hold/Resume**: Put active call on hold
-- **Swap**: Switch between active and held calls
-- **Merge**: Merge two calls into a conference (carrier-dependent)
-- **Add Call**: Open dialer to add another call
-- **Conference Management**: Validates and enables merge based on Telecom capabilities
+- **Hold/Resume**: Robust transition handling to prevent audio drops.
+- **Swap**: Manual selection menu for 2+ calls; uses sequential hold/unhold with 300ms safety delays.
+- **Merge**: Conference two calls with **automatic focus restoration** and unhold fallbacks.
+- **Add Call**: Intent-based dialer launch with automatic management of current calls.
+- **Notification Persistence**: Notification stays active and non-dismissible until the final call is closed.
 
 ### Lock Screen Handling
 
@@ -521,5 +522,9 @@ This module is part of the DefaultDialer project.
 For issues, questions, or contributions related to the dialer-core module, please refer to the main project repository.
 
 ---
+
+---
+
+**Maintained by [FayyazTech](https://github.com/fayyaztech)**
 
 **Note**: This is a reusable module designed for integration into multiple dialer applications. The main app module (containing contacts, dialpad, history screens) is kept separate for easy customization per app.
