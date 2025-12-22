@@ -21,3 +21,4 @@ out/
 captures/
 output.json
 .kotlin/
+dialer-core/build/*
