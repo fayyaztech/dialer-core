@@ -346,10 +346,14 @@ class DefaultInCallService : InCallService() {
             }
             notificationManager.createNotificationChannel(missedCallChannel)
         }
-    }    private val callCallback =
+    }
+
+    private val callCallback =
             object : Call.Callback() {
                 override fun onStateChanged(call: Call?, state: Int) {
                     super.onStateChanged(call, state)
+                    Log.d(TAG, "Call Callback: onStateChanged -> $state")
+                    updateCallNotification()
 
                     when (state) {
                         Call.STATE_DIALING -> {
@@ -359,12 +363,10 @@ class DefaultInCallService : InCallService() {
                         Call.STATE_RINGING -> {
                             Log.d(TAG, "Call State: RINGING")
                             launchCallScreen(call, "Incoming call...")
-                            call?.let { showIncomingCallNotification(it) }
                         }
                         Call.STATE_ACTIVE -> {
                             Log.d(TAG, "Call State: ACTIVE")
                             updateCallScreen(call, "Active")
-                            call?.let { showOngoingCallNotification(it) }
                         }
                         Call.STATE_DISCONNECTED -> {
                             val disconnectCause = call?.details?.disconnectCause
@@ -384,17 +386,11 @@ class DefaultInCallService : InCallService() {
                                     }
 
                             Log.d(TAG, "Call disconnected by: $callDisconnectedBy")
-                            Log.d(TAG, "Disconnect reason: ${disconnectCause?.reason}")
-
-                            // Show missed call notification if the call was missed
+                            
                             if (disconnectCause?.code == DisconnectCause.MISSED) {
                                 call?.let { showMissedCallNotification(it) }
                             }
 
-                            // Launch/Update call screen to show the disconnect error/reason to the
-                            // user
-                            // This ensures that if a call fails immediately (e.g. Out of Service),
-                            // the user sees it.
                             val reason = disconnectCause?.reason ?: "Unknown"
                             val stateLabel =
                                     if (disconnectCause?.code == DisconnectCause.ERROR ||
@@ -405,10 +401,9 @@ class DefaultInCallService : InCallService() {
                                         "Disconnected"
                                     }
                             launchCallScreen(call, stateLabel)
-                            cancelCallNotification()
-
+                            
                             call?.unregisterCallback(this)
-                            currentCall = null
+                            if (currentCall == call) currentCall = null
                         }
                     }
                 }
@@ -416,45 +411,35 @@ class DefaultInCallService : InCallService() {
 
     override fun onCallAdded(call: Call?) {
         super.onCallAdded(call)
-        currentCall = call
-        // Set the instance reference
         instance = this
-        // Initialize audio manager from the InCallService context — this is required
-        // to reliably toggle microphone and speaker for telecom-managed calls.
+        Log.d(TAG, "onCallAdded: state=${call?.state}")
+        
+        // Track the most recent call
+        currentCall = call
+        
         try {
             audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            Log.d(TAG, "AudioManager initialized in InCallService: mode=${audioManager?.mode}")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to initialize AudioManager in InCallService", e)
-        }
+        } catch (_: Exception) {}
+        
         call?.registerCallback(callCallback)
+        updateCallNotification()
 
-        // Show notification immediately for incoming calls
+        // Launch call screen for new calls if it's not already showing or if it's incoming
         if (call?.state == Call.STATE_RINGING) {
-            showIncomingCallNotification(call)
+            launchCallScreen(call, "Incoming call...")
+        } else if (call?.state == Call.STATE_DIALING || call?.state == Call.STATE_CONNECTING) {
+            launchCallScreen(call, "Dialing...")
         }
-
-        val callCount = getCalls().size
-        Log.d(TAG, "Call added. Total active calls: $callCount")
     }
 
     override fun onCallRemoved(call: Call?) {
         super.onCallRemoved(call)
+        Log.d(TAG, "onCallRemoved")
         call?.unregisterCallback(callCallback)
-        if (currentCall == call) currentCall = null
-        // Clear instance reference when no more calls
-        if (getCalls().isEmpty()) {
-            instance = null
+        if (currentCall == call) {
+            currentCall = getAllCalls().firstOrNull()
         }
-        // Clear audio manager when call is removed — keep conservative cleanup
-        try {
-            audioManager = null
-        } catch (_: Exception) {}
-        
-        val callCount = getCalls().size
-        Log.d(TAG, "Call removed. Total active calls: $callCount")
-        
-        cancelCallNotification()
+        updateCallNotification()
     }
 
     override fun onCallAudioStateChanged(audioState: android.telecom.CallAudioState?) {
@@ -462,170 +447,167 @@ class DefaultInCallService : InCallService() {
         audioState?.let {
             val intent = Intent(ACTION_AUDIO_STATE_CHANGED).apply {
                 putExtra(EXTRA_AUDIO_STATE, it)
-                setPackage(packageName) // Restrict to own package for security
+                setPackage(packageName)
             }
             sendBroadcast(intent)
-            Log.d(TAG, "onCallAudioStateChanged: $it")
+        }
+    }
+
+    /**
+     * Primary logic to update the ongoing notification based on all active calls.
+     */
+    private fun updateCallNotification() {
+        val allCalls = getAllCalls()
+        Log.d(TAG, "updateCallNotification: ${allCalls.size} calls")
+
+        if (allCalls.isEmpty()) {
+            cancelCallNotification()
+            return
+        }
+
+        // Determine which call to show as primary in the notification
+        // Priority: RINGING > ACTIVE > DIALING > HOLDING
+        val ringingCall = allCalls.find { it.state == Call.STATE_RINGING }
+        val activeCall = allCalls.find { it.state == Call.STATE_ACTIVE }
+        val dialingCall = allCalls.find { it.state == Call.STATE_DIALING || it.state == Call.STATE_CONNECTING }
+        val holdingCall = allCalls.find { it.state == Call.STATE_HOLDING }
+
+        val primaryCall = ringingCall ?: activeCall ?: dialingCall ?: holdingCall ?: allCalls.first()
+        
+        if (ringingCall != null) {
+            showIncomingCallNotification(ringingCall)
+        } else {
+            showOngoingCallNotification(primaryCall, allCalls)
         }
     }
 
     private fun showIncomingCallNotification(call: Call) {
-        val fullScreenIntent =
-                Intent(this, CallScreenActivity::class.java).apply {
-                    putExtra("PHONE_NUMBER", call.details.handle?.schemeSpecificPart ?: "Unknown")
-                    putExtra("CALL_STATE", "Incoming")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                }
-        val fullScreenPendingIntent =
-                PendingIntent.getActivity(
-                        this,
-                        0,
-                        fullScreenIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-
-        val acceptIntent =
-                Intent(this, CallActionReceiver::class.java).apply { action = "ACCEPT_CALL" }
-        val acceptPendingIntent =
-                PendingIntent.getBroadcast(
-                        this,
-                        1,
-                        acceptIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-
-        val rejectIntent =
-                Intent(this, CallActionReceiver::class.java).apply { action = "REJECT_CALL" }
-        val rejectPendingIntent =
-                PendingIntent.getBroadcast(
-                        this,
-                        2,
-                        rejectIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-
         val phoneNumber = call.details.handle?.schemeSpecificPart ?: "Unknown"
         val contactName = getContactName(phoneNumber) ?: phoneNumber
 
-        val caller =
-                Person.Builder()
-                        .setName(contactName)
-                        .build()
-
-        val notification =
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    Notification.Builder(this, "call_channel")
-                            .setSmallIcon(android.R.drawable.sym_call_incoming)
-                            .setStyle(
-                                    Notification.CallStyle.forIncomingCall(
-                                            caller,
-                                            rejectPendingIntent,
-                                            acceptPendingIntent
-                                    )
-                            )
-                            .setFullScreenIntent(fullScreenPendingIntent, true)
-                            .setOngoing(true)
-                            .setVibrate(longArrayOf(0, 1000, 500, 1000))
-                            .build()
-                } else {
-                    NotificationCompat.Builder(this, "call_channel")
-                            .setSmallIcon(android.R.drawable.sym_call_incoming)
-                            .setContentTitle("Incoming Call")
-                            .setContentText(contactName)
-                            .addAction(
-                                    android.R.drawable.ic_menu_close_clear_cancel,
-                                    "Reject",
-                                    rejectPendingIntent
-                            )
-                            .addAction(
-                                    android.R.drawable.ic_menu_call,
-                                    "Accept",
-                                    acceptPendingIntent
-                            )
-                            .setPriority(NotificationCompat.PRIORITY_HIGH)
-                            .setCategory(NotificationCompat.CATEGORY_CALL)
-                            .setFullScreenIntent(fullScreenPendingIntent, true)
-                            .setOngoing(true)
-                            .setVibrate(longArrayOf(0, 1000, 500, 1000))
-                            .build()
-                }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL)
-        } else {
-            startForeground(1, notification)
+        val fullScreenIntent = Intent(this, CallScreenActivity::class.java).apply {
+            putExtra("PHONE_NUMBER", phoneNumber)
+            putExtra("CALL_STATE", "Incoming")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
+        val fullScreenPendingIntent = PendingIntent.getActivity(
+            this, 0, fullScreenIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val acceptPendingIntent = PendingIntent.getBroadcast(
+            this, 1, Intent(this, CallActionReceiver::class.java).apply { action = "ACCEPT_CALL" },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val rejectPendingIntent = PendingIntent.getBroadcast(
+            this, 2, Intent(this, CallActionReceiver::class.java).apply { action = "REJECT_CALL" },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val caller = Person.Builder().setName(contactName).build()
+
+        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Notification.Builder(this, "call_channel")
+                .setSmallIcon(android.R.drawable.sym_call_incoming)
+                .setStyle(Notification.CallStyle.forIncomingCall(caller, rejectPendingIntent, acceptPendingIntent))
+                .setFullScreenIntent(fullScreenPendingIntent, true)
+                .setOngoing(true)
+                .setCategory(Notification.CATEGORY_CALL)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .build()
+        } else {
+            NotificationCompat.Builder(this, "call_channel")
+                .setSmallIcon(android.R.drawable.sym_call_incoming)
+                .setContentTitle("Incoming Call")
+                .setContentText(contactName)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Reject", rejectPendingIntent)
+                .addAction(android.R.drawable.ic_menu_call, "Accept", acceptPendingIntent)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setFullScreenIntent(fullScreenPendingIntent, true)
+                .setOngoing(true)
+                .build()
+        }
+
+        startForeground(1, notification, getForegroundServiceTypeCompat())
     }
 
-    private fun showOngoingCallNotification(call: Call) {
-        val returnIntent =
-                Intent(this, CallScreenActivity::class.java).apply {
-                    putExtra("PHONE_NUMBER", call.details.handle?.schemeSpecificPart ?: "Unknown")
-                    putExtra("CALL_STATE", "Active")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                }
-        val returnPendingIntent =
-                PendingIntent.getActivity(
-                        this,
-                        3,
-                        returnIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-
-        val hangupIntent =
-                Intent(this, CallActionReceiver::class.java).apply { action = "HANGUP_CALL" }
-        val hangupPendingIntent =
-                PendingIntent.getBroadcast(
-                        this,
-                        4,
-                        hangupIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-
-        val phoneNumber = call.details.handle?.schemeSpecificPart ?: "Unknown"
+    private fun showOngoingCallNotification(primaryCall: Call, allCalls: List<Call>) {
+        val phoneNumber = primaryCall.details.handle?.schemeSpecificPart ?: "Unknown"
         val contactName = getContactName(phoneNumber) ?: phoneNumber
-
-        val caller =
-                Person.Builder()
-                        .setName(contactName)
-                        .build()
-
-        val notification =
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    Notification.Builder(this, "call_channel")
-                            .setSmallIcon(android.R.drawable.sym_call_outgoing)
-                            .setStyle(
-                                    Notification.CallStyle.forOngoingCall(
-                                            caller,
-                                            hangupPendingIntent
-                                    )
-                            )
-                            .setContentIntent(returnPendingIntent)
-                            .setOngoing(true)
-                            .build()
-                } else {
-                    NotificationCompat.Builder(this, "call_channel")
-                            .setSmallIcon(android.R.drawable.sym_call_outgoing)
-                            .setContentTitle("Ongoing Call")
-                            .setContentText(contactName)
-                            .setUsesChronometer(true)
-                            .setWhen(call.details.connectTimeMillis)
-                            .setContentIntent(returnPendingIntent)
-                            .addAction(
-                                    android.R.drawable.ic_menu_close_clear_cancel,
-                                    "Hangup",
-                                    hangupPendingIntent
-                            )
-                            .setPriority(NotificationCompat.PRIORITY_LOW)
-                            .setCategory(NotificationCompat.CATEGORY_CALL)
-                            .setOngoing(true)
-                            .build()
-                }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL)
+        
+        // Multi-call info text
+        val contentText = if (allCalls.size > 1) {
+            val otherCount = allCalls.size - 1
+            "$contactName (and $otherCount other call${if (otherCount > 1) "s" else ""})"
         } else {
-            startForeground(1, notification)
+            contactName
+        }
+
+        val returnIntent = Intent(this, CallScreenActivity::class.java).apply {
+            putExtra("PHONE_NUMBER", phoneNumber)
+            putExtra("CALL_STATE", when(primaryCall.state) {
+                Call.STATE_ACTIVE -> "Active"
+                Call.STATE_DIALING, Call.STATE_CONNECTING -> "Dialing"
+                Call.STATE_HOLDING -> "On Hold"
+                else -> "Active"
+            })
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val returnPendingIntent = PendingIntent.getActivity(
+            this, 3, returnIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val hangupPendingIntent = PendingIntent.getBroadcast(
+            this, 4, Intent(this, CallActionReceiver::class.java).apply { action = "HANGUP_CALL" },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val caller = Person.Builder().setName(contactName).build()
+
+        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Notification.Builder(this, "call_channel")
+                .setSmallIcon(android.R.drawable.sym_call_outgoing)
+                .setStyle(Notification.CallStyle.forOngoingCall(caller, hangupPendingIntent))
+                .setContentTitle(if (primaryCall.state == Call.STATE_ACTIVE) "Ongoing Call" else "Dialing...")
+                .setContentText(contentText)
+                .setContentIntent(returnPendingIntent)
+                .setOngoing(true)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .apply {
+                    if (primaryCall.state == Call.STATE_ACTIVE) {
+                        setUsesChronometer(true)
+                        setWhen(primaryCall.details.connectTimeMillis)
+                    }
+                }
+                .build()
+        } else {
+            NotificationCompat.Builder(this, "call_channel")
+                .setSmallIcon(android.R.drawable.sym_call_outgoing)
+                .setContentTitle(if (primaryCall.state == Call.STATE_ACTIVE) "Ongoing Call" else "Dialing...")
+                .setContentText(contentText)
+                .setContentIntent(returnPendingIntent)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Hangup", hangupPendingIntent)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setOngoing(true)
+                .apply {
+                    if (primaryCall.state == Call.STATE_ACTIVE) {
+                        setUsesChronometer(true)
+                        setWhen(primaryCall.details.connectTimeMillis)
+                    }
+                }
+                .build()
+        }
+
+        startForeground(1, notification, getForegroundServiceTypeCompat())
+    }
+
+    private fun getForegroundServiceTypeCompat(): Int {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+        } else {
+            0
         }
     }
 
@@ -637,28 +619,19 @@ class DefaultInCallService : InCallService() {
 
     private fun showMissedCallNotification(call: Call) {
         val phoneNumber = call.details.handle?.schemeSpecificPart ?: "Unknown"
-        
-        // Intent to open main app activity when notification is tapped
         val openHistoryIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         } ?: return
         val openHistoryPendingIntent = PendingIntent.getActivity(
-            this, 
-            100, 
-            openHistoryIntent, 
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            this, 100, openHistoryIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Intent to call back the missed caller
         val callBackIntent = Intent(Intent.ACTION_CALL).apply {
             data = android.net.Uri.parse("tel:$phoneNumber")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         val callBackPendingIntent = PendingIntent.getActivity(
-            this,
-            101,
-            callBackIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            this, 101, callBackIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val notification = NotificationCompat.Builder(this, "missed_call_channel")
@@ -669,11 +642,7 @@ class DefaultInCallService : InCallService() {
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setContentIntent(openHistoryPendingIntent)
             .setAutoCancel(true)
-            .addAction(
-                android.R.drawable.sym_action_call,
-                "Call Back",
-                callBackPendingIntent
-            )
+            .addAction(android.R.drawable.sym_action_call, "Call Back", callBackPendingIntent)
             .build()
 
         val notificationManager = getSystemService(NotificationManager::class.java)
@@ -681,155 +650,67 @@ class DefaultInCallService : InCallService() {
     }
 
     private fun launchCallScreen(call: Call?, callState: String) {
-        // Try multiple methods to get phone number. For VoLTE/IMS/hidden numbers the
-        // Telecom stack may not always provide a /schemeSpecificPart/ — check the
-        // TelecomManager.EXTRA_INCOMING_NUMBER in the call details' intent extras
-        // as a robust fallback (some carriers / OEMs populate it).
         var phoneNumber = call?.details?.handle?.schemeSpecificPart
-
-        // Try Telecom extras fallback (VoLTE/IMS or hidden number cases)
         if (phoneNumber.isNullOrEmpty() || phoneNumber == "Unknown") {
             try {
                 val extras = call?.details?.intentExtras
-                // Compatible fallback for incoming number constant when compileSdk lacks the field
                 val fromTelecom = extras?.getString("android.telecom.extra.INCOMING_NUMBER")
-                phoneNumber =
-                        if (!fromTelecom.isNullOrEmpty()) fromTelecom
-                        else
-                                call?.details
-                                        ?.handle
-                                        ?.toString()
-                                        ?.substringAfter("tel:")
-                                        ?.substringBefore("@")
-                                        ?: "Unknown"
+                phoneNumber = if (!fromTelecom.isNullOrEmpty()) fromTelecom
+                else call?.details?.handle?.toString()?.substringAfter("tel:")?.substringBefore("@") ?: "Unknown"
             } catch (_: Exception) {
-                phoneNumber =
-                        call?.details
-                                ?.handle
-                                ?.toString()
-                                ?.substringAfter("tel:")
-                                ?.substringBefore("@")
-                                ?: "Unknown"
+                phoneNumber = call?.details?.handle?.toString()?.substringAfter("tel:")?.substringBefore("@") ?: "Unknown"
             }
         }
-
-        // Clean up the phone number (remove any spaces or special formatting)
         phoneNumber = phoneNumber.replace(" ", "").replace("-", "")
-
-        Log.d(TAG, "Launching call screen - Raw Handle: ${'$'}{call?.details?.handle}")
-        Log.d(
-                TAG,
-                "Launching call screen - Extracted Number: ${'$'}phoneNumber, State: ${'$'}callState"
-        )
-
-        // Delegate actual activity creation/launch to shared helper to avoid races
-        // when starting/updating the call screen from different call states.
         showCallScreen(phoneNumber, callState, canConference = false, canMerge = false)
     }
 
     private fun updateCallScreen(call: Call?, callState: String) {
-        // In a real implementation, you would broadcast this state change
-        // to update the CallScreenActivity
-        Log.d(TAG, "Call state updated to: ${'$'}callState")
-        // If call becomes active, tell CallScreenActivity it can show conference/merge options
         if (callState.contains("Active", ignoreCase = true)) {
-            // For active calls prefer schemeSpecificPart but fall back to any
-            // Telecom-provided incoming number (TelecomManager.EXTRA_INCOMING_NUMBER)
-            // or the raw handle string. This improves handling for VoLTE/IMS calls.
             var phoneNumber = call?.details?.handle?.schemeSpecificPart
             if (phoneNumber.isNullOrEmpty() || phoneNumber == "Unknown") {
                 try {
                     val extras = call?.details?.intentExtras
                     val fromTelecom = extras?.getString("android.telecom.extra.INCOMING_NUMBER")
-                    phoneNumber =
-                            if (!fromTelecom.isNullOrEmpty()) fromTelecom
-                            else
-                                    call?.details
-                                            ?.handle
-                                            ?.toString()
-                                            ?.substringAfter("tel:")
-                                            ?.substringBefore("@")
-                                            ?: "Unknown"
+                    phoneNumber = if (!fromTelecom.isNullOrEmpty()) fromTelecom
+                    else call?.details?.handle?.toString()?.substringAfter("tel:")?.substringBefore("@") ?: "Unknown"
                 } catch (_: Exception) {
-                    phoneNumber =
-                            call?.details
-                                    ?.handle
-                                    ?.toString()
-                                    ?.substringAfter("tel:")
-                                    ?.substringBefore("@")
-                                    ?: "Unknown"
+                    phoneNumber = call?.details?.handle?.toString()?.substringAfter("tel:")?.substringBefore("@") ?: "Unknown"
                 }
             }
-
-            // Use a single helper to create and launch/update the call screen safely.
             showCallScreen(phoneNumber, callState, canConference = true, canMerge = true)
         }
     }
 
-    // Centralized helper to start/update the CallScreenActivity. Consolidating intent
-    // creation and flags here reduces the chance of race conditions when multiple
-    // state changes attempt to update the activity at once and guarantees consistent
-    // launch flags / extras across all code paths.
-    private fun showCallScreen(
-            phoneNumber: String,
-            callState: String,
-            canConference: Boolean,
-            canMerge: Boolean
-    ) {
-        val intent =
-                Intent(this, CallScreenActivity::class.java).apply {
-                    putExtra("PHONE_NUMBER", phoneNumber)
-                    putExtra("CALL_STATE", callState)
-                    putExtra(CallScreenActivity.EXTRA_CAN_CONFERENCE, canConference)
-                    putExtra(CallScreenActivity.EXTRA_CAN_MERGE, canMerge)
-                    // Use NEW_TASK | CLEAR_TOP | NO_ANIMATION when launching from InCallService
-                    // to avoid freezes/crashes on locked screen (Android 14+). Remove
-                    // NO_USER_ACTION and REORDER_TO_FRONT which can cause UI issues.
-                    addFlags(
-                            Intent.FLAG_ACTIVITY_NEW_TASK or
-                                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                                    Intent.FLAG_ACTIVITY_NO_ANIMATION
-                    )
-                    addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
-                }
-
+    private fun showCallScreen(phoneNumber: String, callState: String, canConference: Boolean, canMerge: Boolean) {
+        val intent = Intent(this, CallScreenActivity::class.java).apply {
+            putExtra("PHONE_NUMBER", phoneNumber)
+            putExtra("CALL_STATE", callState)
+            putExtra(CallScreenActivity.EXTRA_CAN_CONFERENCE, canConference)
+            putExtra(CallScreenActivity.EXTRA_CAN_MERGE, canMerge)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
+        }
         try {
             startActivity(intent)
-            Log.d(TAG, "Call screen started/updated for: $phoneNumber, state=$callState")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start/update call screen", e)
         }
     }
 
     private fun getContactName(phoneNumber: String): String? {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
             return null
         }
-
-        val uri =
-            ContactsContract.PhoneLookup.CONTENT_FILTER_URI
-                .buildUpon()
-                .appendPath(phoneNumber)
-                .build()
-
+        val uri = ContactsContract.PhoneLookup.CONTENT_FILTER_URI.buildUpon().appendPath(phoneNumber).build()
         var contactName: String? = null
-        val cursor = contentResolver.query(
-            uri,
-            arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME),
-            null,
-            null,
-            null
-        )
-
+        val cursor = contentResolver.query(uri, arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null)
         cursor?.use {
             if (it.moveToFirst()) {
                 contactName = it.getString(0)
             }
         }
-
         return contactName
     }
 }
