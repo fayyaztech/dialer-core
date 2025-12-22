@@ -11,9 +11,9 @@ A reusable Android library module that provides core telephony/dialer functional
 
 ### What's Included
 
-- ✅ Complete `InCallService` implementation
+- ✅ Complete `InCallService` implementation with Android 12+ `CallStyle`
 - ✅ Modern Jetpack Compose in-call UI with Material3
-- ✅ Multi-call support (hold, swap, merge, conference)
+- ✅ Multi-call support (hold, swap with selection menu, merge fallback)
 - ✅ Audio routing (earpiece, speaker, bluetooth)
 - ✅ Call screening framework
 - ✅ Lock screen support with full-screen incoming call UI
@@ -75,9 +75,9 @@ That's it! The module handles incoming calls, in-call UI, audio routing, and cal
 
 ### Multi-Call Operations
 - Hold and resume calls
-- Swap between multiple calls
-- Merge calls into conference
-- Add new call during active call
+- Swap between multiple calls with a **selection menu**
+- Intelligent merge/conference with **automatic state recovery**
+- "Add Call" with automatic focus and state management
 
 ### In-Call UI
 - Beautiful Material3 Compose design
