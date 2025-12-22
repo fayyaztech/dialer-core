@@ -11,7 +11,6 @@ A reusable Android library module that provides core telephony/dialer functional
 
 ### Roadmap 🚀
 - [ ] Flutter implementation (Planned)
-- [ ] iOS Core (Future consideration)
 
 ### What's Included
 
