@@ -403,7 +403,10 @@ class DefaultInCallService : InCallService() {
                             launchCallScreen(call, stateLabel)
                             
                             call?.unregisterCallback(this)
-                            if (currentCall == call) currentCall = null
+                            if (currentCall == call) {
+                                currentCall = getAllCalls().firstOrNull()
+                            }
+                            updateCallNotification()
                         }
                     }
                 }
@@ -421,6 +424,11 @@ class DefaultInCallService : InCallService() {
             audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         } catch (_: Exception) {}
         
+        if (call?.state != Call.STATE_RINGING) {
+            val otherCalls = getAllCalls().filter { it != call && it.state == Call.STATE_ACTIVE }
+            otherCalls.forEach { it.hold() }
+        }
+
         call?.registerCallback(callCallback)
         updateCallNotification()
 
@@ -472,7 +480,12 @@ class DefaultInCallService : InCallService() {
         val dialingCall = allCalls.find { it.state == Call.STATE_DIALING || it.state == Call.STATE_CONNECTING }
         val holdingCall = allCalls.find { it.state == Call.STATE_HOLDING }
 
-        val primaryCall = ringingCall ?: activeCall ?: dialingCall ?: holdingCall ?: allCalls.first()
+        val primaryCall = ringingCall ?: activeCall ?: dialingCall ?: holdingCall ?: allCalls.firstOrNull()
+        if (primaryCall == null) {
+            cancelCallNotification()
+            return
+        }
+        currentCall = primaryCall
         
         if (ringingCall != null) {
             showIncomingCallNotification(ringingCall)
