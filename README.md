@@ -233,7 +233,7 @@ See [LICENSE](LICENSE) for full details.
 
 - **Github**: [fayyaztech](https://github.com/fayyaztech)
 - **Issues**: [GitHub Issues](https://github.com/sycet-erp/dialer-core/issues)
-- **Email**: support@fayyaztech.com
+- **Email**: fayyaztech@gmail.com
 
 ## Related Projects
 
