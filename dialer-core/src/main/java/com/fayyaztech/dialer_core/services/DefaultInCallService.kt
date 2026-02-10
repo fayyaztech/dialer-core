@@ -23,6 +23,7 @@ import android.provider.ContactsContract
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import com.fayyaztech.dialer_core.ui.call.CallScreenActivity
+import com.fayyaztech.dialer_core.callbacks.CallStateListener
 
 /**
  * In-call service implementation used by Telecom for presenting in-call UI and for controlling call
@@ -40,6 +41,10 @@ class DefaultInCallService : InCallService() {
         const val EXTRA_AUDIO_STATE = "EXTRA_AUDIO_STATE"
         var currentCall: Call? = null
         var callDisconnectedBy: String = "Unknown"
+        
+        // Platform-agnostic callback listener for call state changes
+        private var callStateListener: CallStateListener? = null
+        
         // Keep reference to the service instance for audio routing
         private var instance: DefaultInCallService? = null
         // Audio manager for muting / speaker control. Must be obtained from the InCallService
@@ -308,6 +313,29 @@ class DefaultInCallService : InCallService() {
         fun setAudioRoute(route: Int) {
             instance?.setAudioRoute(route)
         }
+
+        /**
+         * Register a callback listener for call state changes.
+         * The listener will be called when calls are answered, ended, added, or removed.
+         *
+         * @param listener The CallStateListener implementation to register
+         */
+        fun registerCallStateListener(listener: CallStateListener?) {
+            synchronized(this) {
+                callStateListener = listener
+                Log.d(TAG, "Call state listener ${if (listener != null) "registered" else "unregistered"}")
+            }
+        }
+
+        /**
+         * Unregister the callback listener.
+         */
+        fun unregisterCallStateListener() {
+            synchronized(this) {
+                callStateListener = null
+                Log.d(TAG, "Call state listener unregistered")
+            }
+        }
     }
 
     override fun onCreate() {
@@ -367,6 +395,8 @@ class DefaultInCallService : InCallService() {
                         Call.STATE_ACTIVE -> {
                             Log.d(TAG, "Call State: ACTIVE")
                             updateCallScreen(call, "Active")
+                            // Notify callback listener that call was answered
+                            invokeCallAnswered(call)
                         }
                         Call.STATE_DISCONNECTED -> {
                             val disconnectCause = call?.details?.disconnectCause
@@ -401,6 +431,9 @@ class DefaultInCallService : InCallService() {
                                         "Disconnected"
                                     }
                             launchCallScreen(call, stateLabel)
+                            
+                            // Notify callback listener about call end with disconnect reason
+                            invokeCallEnded(call, callDisconnectedBy)
                             
                             call?.unregisterCallback(this)
                             if (currentCall == call) {
@@ -725,5 +758,47 @@ class DefaultInCallService : InCallService() {
             }
         }
         return contactName
+    }
+
+    /**
+     * Invoke the call answered callback on the registered listener.
+     * Platform-agnostic - the listener handles conversion to the target platform.
+     */
+    private fun invokeCallAnswered(call: Call?) {
+        try {
+            val phoneNumber = call?.details?.handle?.schemeSpecificPart ?: return
+            // Determine call direction based on call properties or state
+            val callDirection = "unknown" // Let the consuming app determine direction
+            // Use connect time if available, otherwise creation time, otherwise current time
+            val callStartTime = call?.details?.connectTimeMillis
+                ?: call?.details?.creationTimeMillis
+                ?: System.currentTimeMillis()
+
+            Log.d(TAG, "Invoking callback: call answered for $phoneNumber")
+            synchronized(DefaultInCallService) {
+                callStateListener?.onCallAnswered(phoneNumber, callDirection, callStartTime)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to invoke call answered callback", e)
+        }
+    }
+
+    /**
+     * Invoke the call ended callback on the registered listener.
+     * Platform-agnostic - the listener handles conversion to the target platform.
+     */
+    private fun invokeCallEnded(call: Call?, disconnectReason: String) {
+        try {
+            val phoneNumber = call?.details?.handle?.schemeSpecificPart ?: return
+            val callDirection = "unknown" // Let the consuming app determine direction
+            val disconnectCauseCode = call?.details?.disconnectCause?.code ?: DisconnectCause.UNKNOWN
+
+            Log.d(TAG, "Invoking callback: call ended for $phoneNumber, reason: $disconnectReason")
+            synchronized(DefaultInCallService) {
+                callStateListener?.onCallEnded(phoneNumber, callDirection, disconnectReason, disconnectCauseCode)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to invoke call ended callback", e)
+        }
     }
 }
