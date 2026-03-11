@@ -71,6 +71,7 @@ import androidx.core.app.ActivityCompat
 import androidx.lifecycle.lifecycleScope
 import com.fayyaztech.dialer_core.services.DefaultInCallService
 import com.fayyaztech.dialer_core.ui.theme.DefaultDialerTheme
+import com.fayyaztech.dialer_core.utils.SmsMessagingService
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -98,6 +99,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.width
 import androidx.compose.animation.with
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Message
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.TextField
+import androidx.compose.material3.OutlinedTextField
 
 @OptIn(ExperimentalAnimationApi::class)
 class CallScreenActivity : ComponentActivity() {
@@ -211,6 +219,7 @@ class CallScreenActivity : ComponentActivity() {
                             callCount = callCountState.value,
                             onAnswerCall = { answerCall() },
                             onRejectCall = { rejectCall() },
+                            onRejectWithSms = { message -> rejectCallWithSms(message) },
                             onEndCall = { endCall() },
                             onToggleMute = { toggleMute() },
                             onSetAudioRoute = { route -> setAudioRoute(route) },
@@ -565,6 +574,70 @@ class CallScreenActivity : ComponentActivity() {
             }, 200)
         } else {
             Log.d("CallScreenActivity", "Rejected call but ${otherCalls.size} calls remain. Staying.")
+            updateCallCount()
+        }
+    }
+
+    /**
+     * Reject the current call and send an SMS message
+     */
+    private fun rejectCallWithSms(message: String) {
+        if (isEndingCall || isFinishing) return
+        
+        Log.d("CallScreenActivity", "Rejecting call with SMS: $message")
+        
+        try {
+            val smsService = SmsMessagingService(this)
+            
+            currentCall?.let { call ->
+                // Extract phone number from call
+                val phoneNumber = call.details.handle.schemeSpecificPart
+                
+                // First reject the call
+                var rejected = false
+                try {
+                    call.reject(false, message)
+                    Log.d("CallScreenActivity", "Call rejected with SMS")
+                    rejected = true
+                } catch (e: Exception) {
+                    Log.e("CallScreenActivity", "Failed to reject call", e)
+                }
+                
+                // If reject failed, try disconnect
+                if (!rejected) {
+                    try {
+                        call.disconnect()
+                        Log.d("CallScreenActivity", "Call disconnected (fallback)")
+                    } catch (e: Exception) {
+                        Log.e("CallScreenActivity", "Failed to disconnect call", e)
+                    }
+                }
+                
+                // Send the SMS
+                try {
+                    smsService.sendSms(phoneNumber, message)
+                    Log.d("CallScreenActivity", "SMS sent to $phoneNumber")
+                } catch (e: Exception) {
+                    Log.e("CallScreenActivity", "Failed to send SMS", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("CallScreenActivity", "Failed to reject call with SMS", e)
+        }
+        
+        // Check if there are other calls
+        val otherCalls = DefaultInCallService.getAllCalls().filter { 
+            it.state != Call.STATE_DISCONNECTED && it.state != Call.STATE_DISCONNECTING && it != currentCall
+        }
+        
+        if (otherCalls.isEmpty()) {
+            isEndingCall = true
+            Log.d("CallScreenActivity", "Rejecting last call, finishing activity")
+            handler.postDelayed({
+                if (!isFinishing) finish()
+            }, 200)
+        } else {
+            Log.d("CallScreenActivity", "Rejected call but ${otherCalls.size} calls remain.")
             updateCallCount()
         }
     }
@@ -1173,7 +1246,8 @@ fun CallScreen(
     initialCallState: String,
     call: Call?,
     onAnswerCall: () -> Unit,
-    onRejectCall: () -> Unit,
+    onRejectCall: () ->Unit,
+    onRejectWithSms: (String) -> Unit,
     onEndCall: () -> Unit,
     onToggleMute: () -> Unit,
     onSetAudioRoute: (Int) -> Unit,
@@ -1205,6 +1279,7 @@ fun CallScreen(
     var isMuted by remember { mutableStateOf(false) }
     var showAudioRouteMenu by remember { mutableStateOf(false) }
     var showSwapMenu by remember { mutableStateOf(false) }
+    var showSmsDialog by remember { mutableStateOf(false) }
     
     // Determine current audio route and available routes
     val currentRoute = audioState?.route ?: CallAudioState.ROUTE_EARPIECE
@@ -1438,6 +1513,25 @@ fun CallScreen(
             ) {
                 // Show answer/reject for incoming calls
                 if (isRinging) {
+                    // "Reject with message" text button above the main buttons
+                    TextButton(
+                        onClick = { showSmsDialog = true },
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Message,
+                            contentDescription = "Message",
+                            modifier = Modifier.size(16.dp),
+                            tint = Color(0xFF8F9BB3)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Reject with message",
+                            color = Color(0xFF8F9BB3),
+                            fontSize = 14.sp
+                        )
+                    }
+                    
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
@@ -1741,6 +1835,19 @@ fun CallScreen(
                 backgroundColor = surfaceColor
             )
         }
+        
+        // SMS Template Selection Dialog
+        if (showSmsDialog) {
+            SmsTemplateDialog(
+                onDismiss = { showSmsDialog = false },
+                onSendSms = { message ->
+                    showSmsDialog = false
+                    onRejectWithSms(message)
+                },
+                surfaceColor = surfaceColor,
+                primaryColor = primaryColor
+            )
+        }
     }
 }
 
@@ -1950,5 +2057,142 @@ fun Modifier.animatePulse(): Modifier = composed {
         )
     )
     this.alpha(alpha)
+}
+
+/**
+ * SMS Template Selection Dialog for Reject-with-Message
+ */
+@Composable
+fun SmsTemplateDialog(
+    onDismiss: () -> Unit,
+    onSendSms: (String) -> Unit,
+    surfaceColor: Color,
+    primaryColor: Color
+) {
+    var showCustomInput by remember { mutableStateOf(false) }
+    var customMessage by remember { mutableStateOf("") }
+    
+    // Default SMS templates
+    val templates = listOf(
+        "I'll call you back later.",
+        "In a meeting. Will call you soon.",
+        "Can't talk now. Text me?",
+        "Driving. I'll call when safe.",
+        "Busy right now. Call you back!",
+        "At work. Will call during break."
+    )
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = surfaceColor,
+        title = {
+            Text(
+                text = "Send Message",
+                color = Color.White,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            if (showCustomInput) {
+                Column {
+                    Text(
+                        text = "Type your message",
+                        color = Color(0xFF8F9BB3),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    OutlinedTextField(
+                        value = customMessage,
+                        onValueChange = { customMessage = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { 
+                            Text(
+                                "Your message...",
+                                color = Color(0xFF8F9BB3).copy(alpha = 0.5f)
+                            ) 
+                        },
+                        colors = androidx.compose.material3.TextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedIndicatorColor = primaryColor,
+                            unfocusedIndicatorColor = Color(0xFF8F9BB3).copy(alpha = 0.3f)
+                        ),
+                        maxLines = 3
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        TextButton(onClick = { showCustomInput = false }) {
+                            Text("Back", color = Color(0xFF8F9BB3))
+                        }
+                        TextButton(
+                            onClick = { 
+                                if (customMessage.isNotBlank()) {
+                                    onSendSms(customMessage)
+                                }
+                            },
+                            enabled = customMessage.isNotBlank()
+                        ) {
+                            Text("Send", color = if (customMessage.isNotBlank()) primaryColor else Color(0xFF8F9BB3).copy(alpha = 0.5f))
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(templates) { template ->
+                        androidx.compose.material3.Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable { onSendSms(template) },
+                            colors = androidx.compose.material3.CardDefaults.cardColors(
+                                containerColor = surfaceColor.copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Text(
+                                text = template,
+                                modifier = Modifier.padding(16.dp),
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                    }
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(
+                            onClick = { showCustomInput = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Message,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = primaryColor
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Custom message...",
+                                color = primaryColor
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (!showCustomInput) {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", color = Color(0xFF8F9BB3))
+                }
+            }
+        }
+    )
 }
 
