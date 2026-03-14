@@ -18,9 +18,12 @@ import android.telecom.Call
 import android.telecom.CallAudioState
 import android.util.Log
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,8 +66,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
@@ -75,6 +84,7 @@ import com.fayyaztech.dialer_core.utils.SmsMessagingService
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.RepeatMode
@@ -90,13 +100,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.composed
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
 import androidx.compose.animation.with
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.material3.AlertDialog
@@ -500,12 +508,34 @@ class CallScreenActivity : ComponentActivity() {
                                     "CallScreenActivity",
                                     "Call disconnected: ${disconnectCause?.reason}"
                             )
-                            callStateState.value = "Disconnected"
-                            updateCallCount()
-
-                            // Only call endCall if we're not already finishing
-                            if (!isEndingCall && !isFinishing) {
-                                handler.postDelayed({ endCall() }, 100)
+                            callStateState.value = "Call ended"
+                            
+                            // Check if there are other active calls
+                            val otherCalls = DefaultInCallService.getAllCalls().filter { 
+                                it.state != Call.STATE_DISCONNECTED && 
+                                it.state != Call.STATE_DISCONNECTING && 
+                                it != currentCall
+                            }
+                            
+                            if (otherCalls.isEmpty()) {
+                                // No other calls - auto close immediately
+                                Log.d("CallScreenActivity", "Last call disconnected - auto closing")
+                                if (!isEndingCall && !isFinishing) {
+                                    isEndingCall = true
+                                    handler.postDelayed({ 
+                                        if (!isFinishing) {
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                                                finishAndRemoveTask()
+                                            } else {
+                                                finish()
+                                            }
+                                        }
+                                    }, 500) // Small delay to show "Call ended" briefly
+                                }
+                            } else {
+                                // Other calls exist - stay open
+                                Log.d("CallScreenActivity", "${otherCalls.size} other calls remain")
+                                updateCallCount()
                             }
                         }
                     }
@@ -586,18 +616,28 @@ class CallScreenActivity : ComponentActivity() {
         
         Log.d("CallScreenActivity", "Rejecting call with SMS: $message")
         
+        // Check SMS permission
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+            Log.e("CallScreenActivity", "SMS permission not granted")
+            Toast.makeText(this, "SMS permission required to send message", Toast.LENGTH_SHORT).show()
+            // Still reject the call even without SMS permission
+            rejectCall()
+            return
+        }
+        
         try {
             val smsService = SmsMessagingService(this)
             
             currentCall?.let { call ->
                 // Extract phone number from call
                 val phoneNumber = call.details.handle.schemeSpecificPart
+                Log.d("CallScreenActivity", "Sending SMS to: $phoneNumber")
                 
                 // First reject the call
                 var rejected = false
                 try {
                     call.reject(false, message)
-                    Log.d("CallScreenActivity", "Call rejected with SMS")
+                    Log.d("CallScreenActivity", "Call rejected")
                     rejected = true
                 } catch (e: Exception) {
                     Log.e("CallScreenActivity", "Failed to reject call", e)
@@ -615,31 +655,28 @@ class CallScreenActivity : ComponentActivity() {
                 
                 // Send the SMS
                 try {
-                    smsService.sendSms(phoneNumber, message)
-                    Log.d("CallScreenActivity", "SMS sent to $phoneNumber")
+                    val smsSent = smsService.sendSms(phoneNumber, message)
+                    if (smsSent) {
+                        Log.d("CallScreenActivity", "SMS sent successfully to $phoneNumber")
+                        Toast.makeText(this, "Message sent", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Log.e("CallScreenActivity", "Failed to send SMS")
+                        Toast.makeText(this, "Failed to send message", Toast.LENGTH_SHORT).show()
+                    }
                 } catch (e: Exception) {
-                    Log.e("CallScreenActivity", "Failed to send SMS", e)
+                    Log.e("CallScreenActivity", "SMS send exception: ${e.message}", e)
+                    Toast.makeText(this, "Failed to send message: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
+            } ?: run {
+                Log.e("CallScreenActivity", "No current call available")
             }
         } catch (e: Exception) {
             Log.e("CallScreenActivity", "Failed to reject call with SMS", e)
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
         
-        // Check if there are other calls
-        val otherCalls = DefaultInCallService.getAllCalls().filter { 
-            it.state != Call.STATE_DISCONNECTED && it.state != Call.STATE_DISCONNECTING && it != currentCall
-        }
-        
-        if (otherCalls.isEmpty()) {
-            isEndingCall = true
-            Log.d("CallScreenActivity", "Rejecting last call, finishing activity")
-            handler.postDelayed({
-                if (!isFinishing) finish()
-            }, 200)
-        } else {
-            Log.d("CallScreenActivity", "Rejected call but ${otherCalls.size} calls remain.")
-            updateCallCount()
-        }
+        // Auto-close after rejection - no need to manually close
+        // The STATE_DISCONNECTED callback will handle closing
     }
 
     private fun endCall() {
@@ -1513,52 +1550,14 @@ fun CallScreen(
             ) {
                 // Show answer/reject for incoming calls
                 if (isRinging) {
-                    // "Reject with message" text button above the main buttons
-                    TextButton(
-                        onClick = { showSmsDialog = true },
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Message,
-                            contentDescription = "Message",
-                            modifier = Modifier.size(16.dp),
-                            tint = Color(0xFF8F9BB3)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Reject with message",
-                            color = Color(0xFF8F9BB3),
-                            fontSize = 14.sp
-                        )
-                    }
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Reject button
-                        ModernCallButton(
-                            onClick = onRejectCall,
-                            icon = Icons.Default.CallEnd,
-                            iconColor = Color.White,
-                            backgroundColor = dangerColor,
-                            size = 72.dp,
-                            label = "Decline",
-                            iconSize = 32.dp
-                        )
-
-                        // Answer button
-                        ModernCallButton(
-                            onClick = onAnswerCall,
-                            icon = Icons.Default.Call,
-                            iconColor = Color.White,
-                            backgroundColor = successColor,
-                            size = 72.dp,
-                            label = "Answer",
-                            iconSize = 32.dp
-                        )
-                    }
+                    // Modern slide to answer/reject UI
+                    SlideToAnswerReject(
+                        onAnswer = onAnswerCall,
+                        onReject = onRejectCall,
+                        onRejectWithMessage = { showSmsDialog = true },
+                        dangerColor = dangerColor,
+                        successColor = successColor
+                    )
                 } else {
                     // Primary call control buttons
                     Row(
@@ -1893,6 +1892,194 @@ fun ModernCallButton(
             style = MaterialTheme.typography.labelSmall,
             color = Color(0xFF8F9BB3)
         )
+    }
+}
+
+/**
+ * Modern slide to answer/reject incoming call UI
+ */
+@Composable
+fun SlideToAnswerReject(
+    onAnswer: () -> Unit,
+    onReject: () -> Unit,
+    onRejectWithMessage: () -> Unit,
+    dangerColor: Color,
+    successColor: Color
+) {
+    var rejectOffsetX by remember { mutableStateOf(0f) }
+    var answerOffsetX by remember { mutableStateOf(0f) }
+    val slideThreshold = 150f
+    
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Message option button
+        TextButton(
+            onClick = onRejectWithMessage,
+            modifier = Modifier.padding(bottom = 4.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Message,
+                contentDescription = "Message",
+                modifier = Modifier.size(18.dp),
+                tint = Color(0xFF8F9BB3)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Reject with message",
+                color = Color(0xFF8F9BB3),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+        
+        // Slide track container
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(90.dp)
+                .background(
+                    color = Color(0xFF222B45).copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(45.dp)
+                )
+                .padding(6.dp)
+        ) {
+            // Reject zone indicator (left)
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(80.dp)
+                    .align(Alignment.CenterStart)
+                    .background(
+                        color = dangerColor.copy(alpha = if (rejectOffsetX < -50f) 0.3f else 0.1f),
+                        shape = RoundedCornerShape(40.dp)
+                    )
+            )
+            
+            // Answer zone indicator (right)
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(80.dp)
+                    .align(Alignment.CenterEnd)
+                    .background(
+                        color = successColor.copy(alpha = if (answerOffsetX > 50f) 0.3f else 0.1f),
+                        shape = RoundedCornerShape(40.dp)
+                    )
+            )
+            
+            // Center text hint
+            Text(
+                text = "Slide to answer or reject",
+                color = Color(0xFF8F9BB3).copy(alpha = 0.6f),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.align(Alignment.Center)
+            )
+            
+            // Reject button (left)
+            Box(
+                modifier = Modifier
+                    .offset(x = (rejectOffsetX / 2).dp)
+                    .align(Alignment.CenterStart)
+                    .padding(start = 4.dp)
+                    .size(74.dp)
+                    .background(
+                        color = dangerColor,
+                        shape = CircleShape
+                    )
+                    .clip(CircleShape)
+                    .pointerInput(Unit) {
+                        detectDragGestures(
+                            onDragEnd = {
+                                if (rejectOffsetX < -slideThreshold) {
+                                    onReject()
+                                }
+                                rejectOffsetX = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val newOffset = rejectOffsetX + dragAmount.x
+                                // Only allow leftward sliding
+                                if (newOffset <= 0f) {
+                                    rejectOffsetX = newOffset.coerceAtLeast(-200f)
+                                }
+                            }
+                        )
+                    }
+                    .clickable { onReject() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CallEnd,
+                    contentDescription = "Reject",
+                    tint = Color.White,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+            
+            // Answer button (right)
+            Box(
+                modifier = Modifier
+                    .offset(x = (answerOffsetX / 2).dp)
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 4.dp)
+                    .size(74.dp)
+                    .background(
+                        color = successColor,
+                        shape = CircleShape
+                    )
+                    .clip(CircleShape)
+                    .pointerInput(Unit) {
+                        detectDragGestures(
+                            onDragEnd = {
+                                if (answerOffsetX > slideThreshold) {
+                                    onAnswer()
+                                }
+                                answerOffsetX = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val newOffset = answerOffsetX + dragAmount.x
+                                // Only allow rightward sliding
+                                if (newOffset >= 0f) {
+                                    answerOffsetX = newOffset.coerceAtMost(200f)
+                                }
+                            }
+                        )
+                    }
+                    .clickable { onAnswer() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Call,
+                    contentDescription = "Answer",
+                    tint = Color.White,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+        }
+        
+        // Labels row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "← Slide to decline",
+                color = Color(0xFF8F9BB3).copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 24.dp)
+            )
+            Text(
+                text = "Slide to answer →",
+                color = Color(0xFF8F9BB3).copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(end = 24.dp)
+            )
+        }
     }
 }
 
