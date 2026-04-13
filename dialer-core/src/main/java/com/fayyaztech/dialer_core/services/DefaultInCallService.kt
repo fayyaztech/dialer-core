@@ -420,17 +420,9 @@ class DefaultInCallService : InCallService() {
                             if (disconnectCause?.code == DisconnectCause.MISSED) {
                                 call?.let { showMissedCallNotification(it) }
                             }
-
-                            val reason = disconnectCause?.reason ?: "Unknown"
-                            val stateLabel =
-                                    if (disconnectCause?.code == DisconnectCause.ERROR ||
-                                                    disconnectCause?.code == DisconnectCause.BUSY
-                                    ) {
-                                        "Error: $reason"
-                                    } else {
-                                        "Disconnected"
-                                    }
-                            launchCallScreen(call, stateLabel)
+                            // Do not relaunch the call UI on disconnected state. If no live calls
+                            // remain, the existing activity should close itself instead of showing
+                            // a stale disconnected screen.
                             
                             // Notify callback listener about call end with disconnect reason
                             invokeCallEnded(call, callDisconnectedBy)

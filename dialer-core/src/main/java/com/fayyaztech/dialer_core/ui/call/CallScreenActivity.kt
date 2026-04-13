@@ -70,6 +70,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -87,10 +88,12 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -184,6 +187,16 @@ class CallScreenActivity : ComponentActivity() {
 
         // Get the current call from the in-call service
         currentCall = DefaultInCallService.currentCall
+
+        if (!hasLiveCall()) {
+            Log.d("CallScreenActivity", "No live calls on create. Closing call screen.")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                finishAndRemoveTask()
+            } else {
+                finish()
+            }
+            return
+        }
 
         // Ensure phone number is populated preferably from the current Call details.
         refreshPhoneNumberFromCallOrIntent()
@@ -1016,6 +1029,17 @@ class CallScreenActivity : ComponentActivity() {
         }
     }
 
+    private fun hasLiveCall(): Boolean {
+        return try {
+            DefaultInCallService.getAllCalls().any {
+                it.state != Call.STATE_DISCONNECTED && it.state != Call.STATE_DISCONNECTING
+            }
+        } catch (e: Exception) {
+            Log.w("CallScreenActivity", "hasLiveCall check failed: ${e.message}", e)
+            currentCall != null
+        }
+    }
+
     override fun onDestroy() {
         Log.d("CallScreenActivity", "onDestroy - cleaning up resources")
         
@@ -1066,6 +1090,16 @@ class CallScreenActivity : ComponentActivity() {
         // Update the UI with new call information
         val previousCall = currentCall
         currentCall = DefaultInCallService.currentCall
+
+        if (!hasLiveCall()) {
+            Log.d("CallScreenActivity", "No live calls on new intent. Closing call screen.")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                finishAndRemoveTask()
+            } else {
+                finish()
+            }
+            return
+        }
         
         // CRITICAL: Immediately update the phone number and state variables for the new call
         refreshPhoneNumberFromCallOrIntent()
@@ -1082,10 +1116,7 @@ class CallScreenActivity : ComponentActivity() {
         // Reset ending flag if we are getting a new valid call
         isEndingCall = false
         
-        // Show snackbar if we are switching to a new incoming/active call
-        if (newCallState.contains("Incoming", ignoreCase = true) || newCallState.contains("Dialing", ignoreCase = true)) {
-            showSnackbar("Focusing on new call: $newPhoneNumber")
-        }
+        // Avoid noisy transient snackbars while call is still incoming/ringing.
     }
 
     // Conference action — placeholder (logs only). Real conference/merge requires telecom provider
@@ -1254,6 +1285,16 @@ class CallScreenActivity : ComponentActivity() {
     }
 
     private fun showSnackbar(message: String) {
+        val isIncomingOrRinging =
+                callStateState.value.contains("Incoming", ignoreCase = true) ||
+                        callStateState.value.contains("Ringing", ignoreCase = true) ||
+                        currentCall?.state == Call.STATE_RINGING
+
+        if (isIncomingOrRinging) {
+            Log.d("CallScreenActivity", "Snackbar suppressed during incoming/ringing: $message")
+            return
+        }
+
         lifecycleScope.launch {
             try {
                 snackbarHostState.value.showSnackbar(message)
@@ -1399,8 +1440,7 @@ fun CallScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .padding(top = 48.dp),
+                    .weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Animated avatar circle
@@ -1906,9 +1946,10 @@ fun SlideToAnswerReject(
     dangerColor: Color,
     successColor: Color
 ) {
-    var rejectOffsetX by remember { mutableStateOf(0f) }
-    var answerOffsetX by remember { mutableStateOf(0f) }
-    val slideThreshold = 150f
+    val coroutineScope = rememberCoroutineScope()
+    val dragOffsetX = remember { Animatable(0f) }
+    val maxDrag = 220f
+    val actionThreshold = 130f
     
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1935,7 +1976,7 @@ fun SlideToAnswerReject(
             )
         }
         
-        // Slide track container
+        // Single center slider track
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1946,122 +1987,128 @@ fun SlideToAnswerReject(
                 )
                 .padding(6.dp)
         ) {
-            // Reject zone indicator (left)
+            val progress = (dragOffsetX.value / maxDrag).coerceIn(-1f, 1f)
+            val leftFill = (-progress).coerceIn(0f, 1f)
+            val rightFill = progress.coerceIn(0f, 1f)
+
+            // Left drop zone feedback
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
-                    .width(80.dp)
+                    .width((70 + (90 * leftFill)).dp)
                     .align(Alignment.CenterStart)
                     .background(
-                        color = dangerColor.copy(alpha = if (rejectOffsetX < -50f) 0.3f else 0.1f),
+                        color = dangerColor.copy(alpha = 0.08f + (0.35f * leftFill)),
                         shape = RoundedCornerShape(40.dp)
                     )
             )
-            
-            // Answer zone indicator (right)
+
+            // Right pickup zone feedback
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
-                    .width(80.dp)
+                    .width((70 + (90 * rightFill)).dp)
                     .align(Alignment.CenterEnd)
                     .background(
-                        color = successColor.copy(alpha = if (answerOffsetX > 50f) 0.3f else 0.1f),
+                        color = successColor.copy(alpha = 0.08f + (0.35f * rightFill)),
                         shape = RoundedCornerShape(40.dp)
                     )
             )
-            
-            // Center text hint
+
+            // Direction hints
             Text(
-                text = "Slide to answer or reject",
-                color = Color(0xFF8F9BB3).copy(alpha = 0.6f),
+                text = "Drop",
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 18.dp)
+            )
+
+            Text(
+                text = "Pickup",
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 18.dp)
+            )
+
+            val knobColor = when {
+                progress > 0f -> lerp(Color(0xFF2B314A), successColor, progress)
+                progress < 0f -> lerp(Color(0xFF2B314A), dangerColor, -progress)
+                else -> Color(0xFF2B314A)
+            }
+
+            val centerHint = when {
+                progress >= 0.6f -> "Release to pickup"
+                progress <= -0.6f -> "Release to drop"
+                progress > 0f -> "Swipe right to pickup"
+                progress < 0f -> "Swipe left to drop"
+                else -> "Swipe to answer or reject"
+            }
+
+            Text(
+                text = centerHint,
+                color = Color(0xFF8F9BB3).copy(alpha = 0.8f),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.align(Alignment.Center)
             )
-            
-            // Reject button (left)
+
+            // Single draggable knob
             Box(
                 modifier = Modifier
-                    .offset(x = (rejectOffsetX / 2).dp)
-                    .align(Alignment.CenterStart)
-                    .padding(start = 4.dp)
+                    .offset(x = dragOffsetX.value.dp)
+                    .align(Alignment.Center)
                     .size(74.dp)
                     .background(
-                        color = dangerColor,
+                        color = knobColor,
                         shape = CircleShape
                     )
                     .clip(CircleShape)
                     .pointerInput(Unit) {
                         detectDragGestures(
                             onDragEnd = {
-                                if (rejectOffsetX < -slideThreshold) {
+                                if (dragOffsetX.value <= -actionThreshold) {
                                     onReject()
-                                }
-                                rejectOffsetX = 0f
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                val newOffset = rejectOffsetX + dragAmount.x
-                                // Only allow leftward sliding
-                                if (newOffset <= 0f) {
-                                    rejectOffsetX = newOffset.coerceAtLeast(-200f)
-                                }
-                            }
-                        )
-                    }
-                    .clickable { onReject() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.CallEnd,
-                    contentDescription = "Reject",
-                    tint = Color.White,
-                    modifier = Modifier.size(36.dp)
-                )
-            }
-            
-            // Answer button (right)
-            Box(
-                modifier = Modifier
-                    .offset(x = (answerOffsetX / 2).dp)
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 4.dp)
-                    .size(74.dp)
-                    .background(
-                        color = successColor,
-                        shape = CircleShape
-                    )
-                    .clip(CircleShape)
-                    .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragEnd = {
-                                if (answerOffsetX > slideThreshold) {
+                                } else if (dragOffsetX.value >= actionThreshold) {
                                     onAnswer()
                                 }
-                                answerOffsetX = 0f
+                                coroutineScope.launch {
+                                    dragOffsetX.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(dampingRatio = 0.75f, stiffness = 420f)
+                                    )
+                                }
+                            },
+                            onDragCancel = {
+                                coroutineScope.launch {
+                                    dragOffsetX.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(dampingRatio = 0.75f, stiffness = 420f)
+                                    )
+                                }
                             },
                             onDrag = { change, dragAmount ->
                                 change.consume()
-                                val newOffset = answerOffsetX + dragAmount.x
-                                // Only allow rightward sliding
-                                if (newOffset >= 0f) {
-                                    answerOffsetX = newOffset.coerceAtMost(200f)
+                                coroutineScope.launch {
+                                    dragOffsetX.snapTo((dragOffsetX.value + dragAmount.x).coerceIn(-maxDrag, maxDrag))
                                 }
                             }
                         )
-                    }
-                    .clickable { onAnswer() },
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Call,
-                    contentDescription = "Answer",
+                    imageVector = if (progress < 0f) Icons.Default.CallEnd else Icons.Default.Call,
+                    contentDescription = "Swipe Action",
                     tint = Color.White,
                     modifier = Modifier.size(36.dp)
                 )
             }
         }
-        
+
         // Labels row
         Row(
             modifier = Modifier.fillMaxWidth(),
