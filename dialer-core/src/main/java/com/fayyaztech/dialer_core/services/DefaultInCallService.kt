@@ -411,18 +411,9 @@ class DefaultInCallService : InCallService() {
         private fun resolveDisconnectParty(causeCode: Int, localMarked: Boolean): String {
             if (localMarked) return DISCONNECT_PARTY_LOCAL
 
-            return when (causeCode) {
-                DisconnectCause.LOCAL -> DISCONNECT_PARTY_LOCAL
-                DisconnectCause.REMOTE,
-                DisconnectCause.MISSED,
-                DisconnectCause.BUSY,
-                DisconnectCause.RESTRICTED,
-                DisconnectCause.ERROR,
-                DisconnectCause.CANCELED,
-                DisconnectCause.REJECTED -> DISCONNECT_PARTY_REMOTE
-                DisconnectCause.UNKNOWN -> DISCONNECT_PARTY_REMOTE
-                else -> DISCONNECT_PARTY_REMOTE
-            }
+            // Strict rule: only explicit user button actions are local.
+            // All unmarked disconnects are treated as remote, regardless of framework cause code.
+            return DISCONNECT_PARTY_REMOTE
         }
 
         /**
@@ -563,6 +554,14 @@ class DefaultInCallService : InCallService() {
 
         call?.registerCallback(callCallback)
         updateCallNotification()
+
+        // Notify Flutter listener about the new call so it can log it immediately
+        val callDirection = when (call?.state) {
+            Call.STATE_RINGING -> "incoming"
+            Call.STATE_DIALING, Call.STATE_CONNECTING -> "outgoing"
+            else -> "unknown"
+        }
+        invokeCallAdded(call, callDirection)
 
         // Launch call screen for new calls if it's not already showing or if it's incoming
         if (call?.state == Call.STATE_RINGING) {
@@ -860,22 +859,34 @@ class DefaultInCallService : InCallService() {
     }
 
     /**
+     * Invoke the call added callback on the registered listener.
+     * Called as soon as onCallAdded fires so Flutter can create a log entry immediately.
+     */
+    private fun invokeCallAdded(call: Call?, callDirection: String) {
+        try {
+            val phoneNumber = call?.details?.handle?.schemeSpecificPart ?: return
+            Log.d(TAG, "Invoking callback: call added for $phoneNumber ($callDirection)")
+            synchronized(DefaultInCallService) {
+                callStateListener?.onCallAdded(phoneNumber, callDirection)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to invoke call added callback", e)
+        }
+    }
+
+    /**
      * Invoke the call answered callback on the registered listener.
      * Platform-agnostic - the listener handles conversion to the target platform.
      */
     private fun invokeCallAnswered(call: Call?) {
         try {
             val phoneNumber = call?.details?.handle?.schemeSpecificPart ?: return
-            // Determine call direction based on call properties or state
-            val callDirection = "unknown" // Let the consuming app determine direction
-            // Use connect time if available, otherwise creation time, otherwise current time
             val callStartTime = call?.details?.connectTimeMillis
                 ?: call?.details?.creationTimeMillis
                 ?: System.currentTimeMillis()
-
             Log.d(TAG, "Invoking callback: call answered for $phoneNumber")
             synchronized(DefaultInCallService) {
-                callStateListener?.onCallAnswered(phoneNumber, callDirection, callStartTime)
+                callStateListener?.onCallAnswered(phoneNumber, "unknown", callStartTime)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to invoke call answered callback", e)
@@ -889,12 +900,10 @@ class DefaultInCallService : InCallService() {
     private fun invokeCallEnded(call: Call?, disconnectReason: String) {
         try {
             val phoneNumber = call?.details?.handle?.schemeSpecificPart ?: return
-            val callDirection = "unknown" // Let the consuming app determine direction
             val disconnectCauseCode = call?.details?.disconnectCause?.code ?: DisconnectCause.UNKNOWN
-
             Log.d(TAG, "Invoking callback: call ended for $phoneNumber, reason: $disconnectReason")
             synchronized(DefaultInCallService) {
-                callStateListener?.onCallEnded(phoneNumber, callDirection, disconnectReason, disconnectCauseCode)
+                callStateListener?.onCallEnded(phoneNumber, "unknown", disconnectReason, disconnectCauseCode)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to invoke call ended callback", e)
