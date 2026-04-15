@@ -14,11 +14,19 @@ class CallActionReceiver : BroadcastReceiver() {
             }
             "REJECT_CALL" -> {
                 Log.d("CallActionReceiver", "Reject call action received")
+                DefaultInCallService.markUserInitiatedDisconnect(
+                    DefaultInCallService.currentCall,
+                    "notification_reject"
+                )
                 DefaultInCallService.currentCall?.reject(false, null)
             }
             "HANGUP_CALL" -> {
                 Log.d("CallActionReceiver", "Hangup call action received")
                 if (DefaultInCallService.currentCall != null) {
+                    DefaultInCallService.markUserInitiatedDisconnect(
+                        DefaultInCallService.currentCall,
+                        "notification_hangup"
+                    )
                     DefaultInCallService.currentCall?.disconnect()
                 } else {
                     // If call is already null/gone, ensure notification is cleared

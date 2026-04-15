@@ -7,6 +7,7 @@ import android.telecom.Call
 import android.telephony.SmsManager
 import android.util.Log
 import androidx.annotation.RequiresApi
+import com.fayyaztech.dialer_core.services.DefaultInCallService
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -80,6 +81,7 @@ class SmsMessagingService(private val context: Context) {
             Log.d(tag, "Rejecting call from $phoneNumber with message: $message")
             
             // First reject the call
+            DefaultInCallService.markUserInitiatedDisconnect(call, "sms_service_reject_with_message")
             call.reject(false, message)
             
             // Then send SMS

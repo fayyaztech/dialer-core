@@ -591,6 +591,7 @@ class CallScreenActivity : ComponentActivity() {
         // Try to reject the call
         try {
             currentCall?.let {
+                DefaultInCallService.markUserInitiatedDisconnect(it, "call_screen_reject")
                 it.reject(false, null)
                 Log.d("CallScreenActivity", "Call.reject() called")
                 rejected = true
@@ -602,6 +603,7 @@ class CallScreenActivity : ComponentActivity() {
         // If reject failed, try disconnect as fallback
         if (!rejected) {
             try {
+                DefaultInCallService.markUserInitiatedDisconnect(currentCall, "call_screen_reject_fallback_disconnect")
                 currentCall?.disconnect()
                 Log.d("CallScreenActivity", "Call.disconnect() called as fallback in rejectCall")
             } catch (e: Exception) {
@@ -649,6 +651,7 @@ class CallScreenActivity : ComponentActivity() {
                 // First reject the call
                 var rejected = false
                 try {
+                    DefaultInCallService.markUserInitiatedDisconnect(call, "call_screen_reject_sms")
                     call.reject(false, message)
                     Log.d("CallScreenActivity", "Call rejected")
                     rejected = true
@@ -659,6 +662,7 @@ class CallScreenActivity : ComponentActivity() {
                 // If reject failed, try disconnect
                 if (!rejected) {
                     try {
+                        DefaultInCallService.markUserInitiatedDisconnect(call, "call_screen_reject_sms_fallback_disconnect")
                         call.disconnect()
                         Log.d("CallScreenActivity", "Call disconnected (fallback)")
                     } catch (e: Exception) {
@@ -708,6 +712,7 @@ class CallScreenActivity : ComponentActivity() {
         // Method 1: Disconnect current call
         try {
             currentCall?.let {
+                DefaultInCallService.markUserInitiatedDisconnect(it, "call_screen_end")
                 it.disconnect()
                 Log.d("CallScreenActivity", "Call.disconnect() called on currentCall")
                 disconnected = true
@@ -722,6 +727,7 @@ class CallScreenActivity : ComponentActivity() {
                 val allCalls = DefaultInCallService.getAllCalls()
                 allCalls.forEach { call ->
                     try {
+                        DefaultInCallService.markUserInitiatedDisconnect(call, "call_screen_end_all")
                         call.disconnect()
                         Log.d("CallScreenActivity", "Call.disconnect() called on service call")
                     } catch (e: Exception) {
@@ -740,6 +746,7 @@ class CallScreenActivity : ComponentActivity() {
         if (!disconnected) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    DefaultInCallService.markUserInitiatedDisconnect(currentCall, "call_screen_end_telecom_fallback")
                     val telecomManager =
                             getSystemService(Context.TELECOM_SERVICE) as?
                                     android.telecom.TelecomManager

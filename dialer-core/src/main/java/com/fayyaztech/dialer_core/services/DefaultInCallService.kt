@@ -41,6 +41,14 @@ class DefaultInCallService : InCallService() {
         const val EXTRA_AUDIO_STATE = "EXTRA_AUDIO_STATE"
         var currentCall: Call? = null
         var callDisconnectedBy: String = "Unknown"
+        var lastDisconnectParty: String = "unknown"
+        var lastDisconnectCauseCode: Int = DisconnectCause.UNKNOWN
+
+        private const val DISCONNECT_PARTY_LOCAL = "local"
+        private const val DISCONNECT_PARTY_REMOTE = "remote"
+        private const val LOCAL_DISCONNECT_MARK_VALIDITY_MS = 12_000L
+        private val userDisconnectMarks: MutableMap<String, Long> = mutableMapOf()
+        private var globalUserDisconnectMarkAtMs: Long = 0L
         
         // Platform-agnostic callback listener for call state changes
         private var callStateListener: CallStateListener? = null
@@ -315,6 +323,109 @@ class DefaultInCallService : InCallService() {
         }
 
         /**
+         * Mark that the user initiated a disconnect/reject action for the given call.
+         */
+        fun markUserInitiatedDisconnect(call: Call?, source: String) {
+            val key = getCallKey(call)
+            if (key == null) {
+                synchronized(userDisconnectMarks) {
+                    globalUserDisconnectMarkAtMs = System.currentTimeMillis()
+                    pruneExpiredDisconnectMarksLocked()
+                }
+                Log.d(TAG, "Marked global local disconnect ($source): no call key")
+                return
+            }
+
+            synchronized(userDisconnectMarks) {
+                userDisconnectMarks[key] = System.currentTimeMillis()
+                pruneExpiredDisconnectMarksLocked()
+            }
+            Log.d(TAG, "Marked local disconnect ($source) for key=$key")
+        }
+
+        private fun consumeUserDisconnectMark(call: Call?): Boolean {
+            val now = System.currentTimeMillis()
+            val key = getCallKey(call)
+            synchronized(userDisconnectMarks) {
+                pruneExpiredDisconnectMarksLocked()
+
+                if (key != null) {
+                    val markedAt = userDisconnectMarks[key]
+                    if (markedAt != null) {
+                        val isRecent = now - markedAt <= LOCAL_DISCONNECT_MARK_VALIDITY_MS
+                        userDisconnectMarks.remove(key)
+                        if (isRecent) return true
+                    }
+                }
+
+                val globalMarkedRecent =
+                        globalUserDisconnectMarkAtMs > 0L &&
+                                now - globalUserDisconnectMarkAtMs <=
+                                        LOCAL_DISCONNECT_MARK_VALIDITY_MS
+                if (globalMarkedRecent) {
+                    globalUserDisconnectMarkAtMs = 0L
+                    return true
+                }
+            }
+            return false
+        }
+
+        private fun getCallKey(call: Call?): String? {
+            val details = call?.details ?: return null
+            val number = details.handle?.schemeSpecificPart ?: "unknown"
+            return "${details.creationTimeMillis}:$number"
+        }
+
+        private fun pruneExpiredDisconnectMarksLocked() {
+            val now = System.currentTimeMillis()
+            val iterator = userDisconnectMarks.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                if (now - entry.value > LOCAL_DISCONNECT_MARK_VALIDITY_MS) {
+                    iterator.remove()
+                }
+            }
+
+            if (globalUserDisconnectMarkAtMs > 0L &&
+                now - globalUserDisconnectMarkAtMs > LOCAL_DISCONNECT_MARK_VALIDITY_MS
+            ) {
+                globalUserDisconnectMarkAtMs = 0L
+            }
+        }
+
+        private fun mapDisconnectReason(code: Int): String {
+            return when (code) {
+                DisconnectCause.LOCAL -> "You (Local User)"
+                DisconnectCause.REMOTE -> "Other Party (Remote User)"
+                DisconnectCause.REJECTED -> "Call Rejected"
+                DisconnectCause.MISSED -> "Missed Call"
+                DisconnectCause.CANCELED -> "Call Canceled"
+                DisconnectCause.BUSY -> "Busy"
+                DisconnectCause.RESTRICTED -> "Restricted"
+                DisconnectCause.ERROR -> "Error"
+                DisconnectCause.UNKNOWN -> "Unknown"
+                else -> "Unknown ($code)"
+            }
+        }
+
+        private fun resolveDisconnectParty(causeCode: Int, localMarked: Boolean): String {
+            if (localMarked) return DISCONNECT_PARTY_LOCAL
+
+            return when (causeCode) {
+                DisconnectCause.LOCAL -> DISCONNECT_PARTY_LOCAL
+                DisconnectCause.REMOTE,
+                DisconnectCause.MISSED,
+                DisconnectCause.BUSY,
+                DisconnectCause.RESTRICTED,
+                DisconnectCause.ERROR,
+                DisconnectCause.CANCELED,
+                DisconnectCause.REJECTED -> DISCONNECT_PARTY_REMOTE
+                DisconnectCause.UNKNOWN -> DISCONNECT_PARTY_REMOTE
+                else -> DISCONNECT_PARTY_REMOTE
+            }
+        }
+
+        /**
          * Register a callback listener for call state changes.
          * The listener will be called when calls are answered, ended, added, or removed.
          *
@@ -400,24 +511,20 @@ class DefaultInCallService : InCallService() {
                         }
                         Call.STATE_DISCONNECTED -> {
                             val disconnectCause = call?.details?.disconnectCause
+                            val disconnectCauseCode = disconnectCause?.code ?: DisconnectCause.UNKNOWN
+                            val localMarked = consumeUserDisconnectMark(call)
+                            val disconnectParty = resolveDisconnectParty(disconnectCauseCode, localMarked)
 
-                            callDisconnectedBy =
-                                    when (disconnectCause?.code) {
-                                        DisconnectCause.LOCAL -> "You (Local User)"
-                                        DisconnectCause.REMOTE -> "Other Party (Remote User)"
-                                        DisconnectCause.REJECTED -> "Call Rejected"
-                                        DisconnectCause.MISSED -> "Missed Call"
-                                        DisconnectCause.CANCELED -> "Call Canceled"
-                                        DisconnectCause.BUSY -> "Busy"
-                                        DisconnectCause.RESTRICTED -> "Restricted"
-                                        DisconnectCause.ERROR -> "Error"
-                                        DisconnectCause.UNKNOWN -> "Unknown"
-                                        else -> "Unknown (${disconnectCause?.code})"
-                                    }
+                            callDisconnectedBy = mapDisconnectReason(disconnectCauseCode)
+                            lastDisconnectParty = disconnectParty
+                            lastDisconnectCauseCode = disconnectCauseCode
 
-                            Log.d(TAG, "Call disconnected by: $callDisconnectedBy")
+                            Log.d(
+                                TAG,
+                                "Call disconnected: reason=$callDisconnectedBy code=$disconnectCauseCode party=$disconnectParty localMarked=$localMarked"
+                            )
                             
-                            if (disconnectCause?.code == DisconnectCause.MISSED) {
+                            if (disconnectCauseCode == DisconnectCause.MISSED) {
                                 call?.let { showMissedCallNotification(it) }
                             }
                             // Do not relaunch the call UI on disconnected state. If no live calls
