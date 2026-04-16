@@ -24,6 +24,14 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import com.fayyaztech.dialer_core.ui.call.CallScreenActivity
 import com.fayyaztech.dialer_core.callbacks.CallStateListener
+// DISCONNECT_TRACKING
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.telephony.TelephonyManager
+import com.fayyaztech.dialer_core.model.CallSnapshot
+import com.fayyaztech.dialer_core.model.DisconnectReason
+import com.fayyaztech.dialer_core.utils.DisconnectReasonClassifier
 
 /**
  * In-call service implementation used by Telecom for presenting in-call UI and for controlling call
@@ -43,6 +51,11 @@ class DefaultInCallService : InCallService() {
         var callDisconnectedBy: String = "Unknown"
         var lastDisconnectParty: String = "unknown"
         var lastDisconnectCauseCode: Int = DisconnectCause.UNKNOWN
+        // DISCONNECT_TRACKING: fine-grained reason + call context at disconnect
+        var lastDisconnectReason: DisconnectReason = DisconnectReason.UNKNOWN
+        var lastCallStateAtEnd: String = "unknown"
+        var lastAudioRouteAtEnd: Int = 0
+        var lastSignalStrengthAtEnd: Int = -1
 
         private const val DISCONNECT_PARTY_LOCAL = "local"
         private const val DISCONNECT_PARTY_REMOTE = "remote"
@@ -50,8 +63,8 @@ class DefaultInCallService : InCallService() {
         private val userDisconnectMarks: MutableMap<String, Long> = mutableMapOf()
         private var globalUserDisconnectMarkAtMs: Long = 0L
         
-        // Platform-agnostic callback listener for call state changes
-        private var callStateListener: CallStateListener? = null
+        // Platform-agnostic callback listeners for call state changes (multiple supported)
+        private val callStateListeners: MutableList<CallStateListener> = mutableListOf()
         
         // Keep reference to the service instance for audio routing
         private var instance: DefaultInCallService? = null
@@ -417,28 +430,56 @@ class DefaultInCallService : InCallService() {
         }
 
         /**
-         * Register a callback listener for call state changes.
-         * The listener will be called when calls are answered, ended, added, or removed.
-         *
-         * @param listener The CallStateListener implementation to register
+         * Add a call state listener. Multiple listeners are supported simultaneously.
+         * Each registered listener receives all callbacks independently.
          */
-        fun registerCallStateListener(listener: CallStateListener?) {
-            synchronized(this) {
-                callStateListener = listener
-                Log.d(TAG, "Call state listener ${if (listener != null) "registered" else "unregistered"}")
+        fun addCallStateListener(listener: CallStateListener) {
+            synchronized(callStateListeners) {
+                if (!callStateListeners.contains(listener)) {
+                    callStateListeners.add(listener)
+                    Log.d(TAG, "Call state listener added (total=${callStateListeners.size})")
+                }
             }
         }
 
         /**
-         * Unregister the callback listener.
+         * Remove a previously added listener. Other registered listeners are unaffected.
+         */
+        fun removeCallStateListener(listener: CallStateListener) {
+            synchronized(callStateListeners) {
+                callStateListeners.remove(listener)
+                Log.d(TAG, "Call state listener removed (total=${callStateListeners.size})")
+            }
+        }
+
+        /**
+         * Backward-compat: replaces all listeners with a single one.
+         * Prefer addCallStateListener for new code.
+         */
+        fun registerCallStateListener(listener: CallStateListener?) {
+            synchronized(callStateListeners) {
+                callStateListeners.clear()
+                if (listener != null) callStateListeners.add(listener)
+                Log.d(TAG, "Call state listener registered via legacy API (total=${callStateListeners.size})")
+            }
+        }
+
+        /**
+         * Backward-compat: removes all listeners.
+         * Prefer removeCallStateListener for new code.
          */
         fun unregisterCallStateListener() {
-            synchronized(this) {
-                callStateListener = null
-                Log.d(TAG, "Call state listener unregistered")
+            synchronized(callStateListeners) {
+                callStateListeners.clear()
+                Log.d(TAG, "All call state listeners unregistered")
             }
         }
     }
+
+    // DISCONNECT_TRACKING: per-call snapshot and dynamic receiver
+    private var currentCallSnapshot: CallSnapshot? = null
+    private var callStateBeforeDisconnect: String = "unknown"
+    private var callTrackingReceiver: BroadcastReceiver? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -493,12 +534,17 @@ class DefaultInCallService : InCallService() {
                         Call.STATE_RINGING -> {
                             Log.d(TAG, "Call State: RINGING")
                             launchCallScreen(call, "Incoming call...")
+                            // DISCONNECT_TRACKING: mark ringing phase in snapshot
+                            currentCallSnapshot?.wasRinging = true
+                            callStateBeforeDisconnect = "RINGING"
                         }
                         Call.STATE_ACTIVE -> {
                             Log.d(TAG, "Call State: ACTIVE")
                             updateCallScreen(call, "Active")
                             // Notify callback listener that call was answered
                             invokeCallAnswered(call)
+                            // DISCONNECT_TRACKING: record active phase
+                            callStateBeforeDisconnect = "ACTIVE"
                         }
                         Call.STATE_DISCONNECTED -> {
                             val disconnectCause = call?.details?.disconnectCause
@@ -509,10 +555,17 @@ class DefaultInCallService : InCallService() {
                             callDisconnectedBy = mapDisconnectReason(disconnectCauseCode)
                             lastDisconnectParty = disconnectParty
                             lastDisconnectCauseCode = disconnectCauseCode
+                            // DISCONNECT_TRACKING: classify fine-grained reason from snapshot
+                            val snap = currentCallSnapshot ?: CallSnapshot()
+                            lastDisconnectReason = DisconnectReasonClassifier.classify(disconnectCauseCode, snap)
+                            lastCallStateAtEnd = callStateBeforeDisconnect
+                            lastAudioRouteAtEnd = snap.audioRoute
+                            lastSignalStrengthAtEnd = snap.signalStrength
 
                             Log.d(
                                 TAG,
-                                "Call disconnected: reason=$callDisconnectedBy code=$disconnectCauseCode party=$disconnectParty localMarked=$localMarked"
+                                "Call disconnected: reason=$callDisconnectedBy code=$disconnectCauseCode party=$disconnectParty " +
+                                "disconnectReason=${lastDisconnectReason} stateAtEnd=$lastCallStateAtEnd localMarked=$localMarked"
                             )
                             
                             if (disconnectCauseCode == DisconnectCause.MISSED) {
@@ -563,6 +616,81 @@ class DefaultInCallService : InCallService() {
         }
         invokeCallAdded(call, callDirection)
 
+        // DISCONNECT_TRACKING: initialise snapshot and register event receivers for this call
+        val sigStrength = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                (getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager)
+                    .signalStrength?.level ?: -1
+            } else -1
+        } catch (_: Exception) { -1 }
+        currentCallSnapshot = CallSnapshot(
+            callDirection = callDirection,
+            signalStrength = sigStrength,
+            snapshotTimeMs = System.currentTimeMillis()
+        )
+        callStateBeforeDisconnect = "unknown"
+        if (callTrackingReceiver == null) {
+            callTrackingReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    val s = currentCallSnapshot ?: return
+                    when (intent.action) {
+                        Intent.ACTION_SCREEN_OFF -> {
+                            s.screenWasOff = true
+                            s.powerKeyPressed = true
+                            Log.d(TAG, "DISCONNECT_TRACKING: screen off during call")
+                        }
+                        Intent.ACTION_AIRPLANE_MODE_CHANGED -> {
+                            if (intent.getBooleanExtra("state", false)) {
+                                s.airplaneModeOn = true
+                                Log.d(TAG, "DISCONNECT_TRACKING: airplane mode on during call")
+                            }
+                        }
+                        "android.telephony.action.SIM_CARD_STATE_CHANGED" -> {
+                            val simState = intent.getIntExtra(
+                                "android.telephony.extra.SIM_STATE",
+                                TelephonyManager.SIM_STATE_UNKNOWN
+                            )
+                            if (simState == TelephonyManager.SIM_STATE_ABSENT) {
+                                s.simRemoved = true
+                                Log.d(TAG, "DISCONNECT_TRACKING: SIM removed during call")
+                            }
+                        }
+                        BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                            s.bluetoothLostJustBefore = true
+                            try {
+                                s.bluetoothDevice = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    intent.getParcelableExtra(
+                                        BluetoothDevice.EXTRA_DEVICE,
+                                        BluetoothDevice::class.java
+                                    )
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                                }
+                            } catch (_: Exception) {}
+                            Log.d(TAG, "DISCONNECT_TRACKING: Bluetooth ACL disconnected during call")
+                        }
+                    }
+                }
+            }
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED)
+                addAction("android.telephony.action.SIM_CARD_STATE_CHANGED")
+                addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    registerReceiver(callTrackingReceiver, filter, Context.RECEIVER_EXPORTED)
+                } else {
+                    registerReceiver(callTrackingReceiver, filter)
+                }
+                Log.d(TAG, "DISCONNECT_TRACKING: call-context receivers registered")
+            } catch (e: Exception) {
+                Log.w(TAG, "DISCONNECT_TRACKING: failed to register receivers", e)
+            }
+        }
+
         // Launch call screen for new calls if it's not already showing or if it's incoming
         if (call?.state == Call.STATE_RINGING) {
             launchCallScreen(call, "Incoming call...")
@@ -579,6 +707,14 @@ class DefaultInCallService : InCallService() {
             currentCall = getAllCalls().firstOrNull()
         }
         updateCallNotification()
+        // DISCONNECT_TRACKING: unregister receivers once no calls remain
+        if (getAllCalls().isEmpty()) {
+            callTrackingReceiver?.let {
+                try { unregisterReceiver(it) } catch (_: Exception) {}
+                callTrackingReceiver = null
+                Log.d(TAG, "DISCONNECT_TRACKING: call-context receivers unregistered")
+            }
+        }
     }
 
     override fun onCallAudioStateChanged(audioState: android.telecom.CallAudioState?) {
@@ -589,6 +725,8 @@ class DefaultInCallService : InCallService() {
                 setPackage(packageName)
             }
             sendBroadcast(intent)
+            // DISCONNECT_TRACKING: keep snapshot audio route current
+            currentCallSnapshot?.audioRoute = it.route
         }
     }
 
@@ -866,17 +1004,16 @@ class DefaultInCallService : InCallService() {
         try {
             val phoneNumber = call?.details?.handle?.schemeSpecificPart ?: return
             Log.d(TAG, "Invoking callback: call added for $phoneNumber ($callDirection)")
-            synchronized(DefaultInCallService) {
-                callStateListener?.onCallAdded(phoneNumber, callDirection)
-            }
+            val snapshot: List<CallStateListener>
+            synchronized(callStateListeners) { snapshot = callStateListeners.toList() }
+            snapshot.forEach { it.onCallAdded(phoneNumber, callDirection) }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to invoke call added callback", e)
         }
     }
 
     /**
-     * Invoke the call answered callback on the registered listener.
-     * Platform-agnostic - the listener handles conversion to the target platform.
+     * Invoke the call answered callback on all registered listeners.
      */
     private fun invokeCallAnswered(call: Call?) {
         try {
@@ -885,26 +1022,25 @@ class DefaultInCallService : InCallService() {
                 ?: call?.details?.creationTimeMillis
                 ?: System.currentTimeMillis()
             Log.d(TAG, "Invoking callback: call answered for $phoneNumber")
-            synchronized(DefaultInCallService) {
-                callStateListener?.onCallAnswered(phoneNumber, "unknown", callStartTime)
-            }
+            val snapshot: List<CallStateListener>
+            synchronized(callStateListeners) { snapshot = callStateListeners.toList() }
+            snapshot.forEach { it.onCallAnswered(phoneNumber, "unknown", callStartTime) }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to invoke call answered callback", e)
         }
     }
 
     /**
-     * Invoke the call ended callback on the registered listener.
-     * Platform-agnostic - the listener handles conversion to the target platform.
+     * Invoke the call ended callback on all registered listeners.
      */
     private fun invokeCallEnded(call: Call?, disconnectReason: String) {
         try {
             val phoneNumber = call?.details?.handle?.schemeSpecificPart ?: return
             val disconnectCauseCode = call?.details?.disconnectCause?.code ?: DisconnectCause.UNKNOWN
             Log.d(TAG, "Invoking callback: call ended for $phoneNumber, reason: $disconnectReason")
-            synchronized(DefaultInCallService) {
-                callStateListener?.onCallEnded(phoneNumber, "unknown", disconnectReason, disconnectCauseCode)
-            }
+            val snapshot: List<CallStateListener>
+            synchronized(callStateListeners) { snapshot = callStateListeners.toList() }
+            snapshot.forEach { it.onCallEnded(phoneNumber, "unknown", disconnectReason, disconnectCauseCode) }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to invoke call ended callback", e)
         }
