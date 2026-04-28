@@ -82,6 +82,7 @@ import androidx.lifecycle.lifecycleScope
 import com.fayyaztech.dialer_core.services.DefaultInCallService
 import com.fayyaztech.dialer_core.ui.theme.DefaultDialerTheme
 import com.fayyaztech.dialer_core.utils.SmsMessagingService
+import com.fayyaztech.dialer_core.utils.StudentDatabaseHelper
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -136,6 +137,7 @@ class CallScreenActivity : ComponentActivity() {
     private val snackbarHostState = mutableStateOf(androidx.compose.material3.SnackbarHostState())
     private var isReceiverRegistered = false
     private val allCallsState = mutableStateOf<List<Call>>(emptyList())
+    private lateinit var studentDbHelper: StudentDatabaseHelper
 
     private val audioStateReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -159,6 +161,9 @@ class CallScreenActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Initialize student database helper
+        studentDbHelper = StudentDatabaseHelper.getInstance(this)
 
         // Set up window flags to show over lock screen and turn screen on
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -257,6 +262,7 @@ class CallScreenActivity : ComponentActivity() {
                              showKeypad = showKeypad,
                              onToggleKeypad = { showKeypad = !showKeypad },
                              getContactName = { number -> getContactName(number) },
+                             getCallType = { number -> getCallType(number) },
                              snackbarHostState = snackbarHostState.value
                      )
                 }
@@ -915,6 +921,31 @@ class CallScreenActivity : ComponentActivity() {
         return contactName
     }
 
+    /**
+     * Determine the call type based on contact presence in phone contacts or student database.
+     * Returns: "personal call", "Admission call", or "unknown call"
+     */
+    private fun getCallType(phoneNumber: String): String {
+        if (phoneNumber.isBlank() || phoneNumber == "Unknown") {
+            return "unknown call"
+        }
+
+        // First check if it's in phone contacts
+        val contactName = getContactName(phoneNumber)
+        if (!contactName.isNullOrBlank()) {
+            return "personal call"
+        }
+
+        // Then check if it's in the student database
+        val isInStudentDb = studentDbHelper.contactExistsInStudents(phoneNumber)
+        if (isInStudentDb) {
+            return "Admission call"
+        }
+
+        // Not found in either
+        return "unknown call"
+    }
+
     /** Update the call count and determine if merge option should be available */
     private fun updateCallCount() {
         handler.post {
@@ -1353,6 +1384,7 @@ fun CallScreen(
     showKeypad: Boolean,
     onToggleKeypad: () -> Unit,
     getContactName: (String) -> String?,
+    getCallType: (String) -> String,
     snackbarHostState: androidx.compose.material3.SnackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -1384,6 +1416,16 @@ fun CallScreen(
     val resolvedNumber = call?.details?.handle?.schemeSpecificPart?.takeIf { it.isNotBlank() } ?: phoneNumber
     val contactName = remember(resolvedNumber) { getContactName(resolvedNumber) }
     val displayName = if (!contactName.isNullOrBlank() && resolvedNumber != "Unknown") contactName else resolvedNumber
+    
+    // Call type state (personal call / Admission call / unknown call)
+    var callType by remember { mutableStateOf("unknown call") }
+    
+    // Update call type when resolved number changes
+    LaunchedEffect(resolvedNumber) {
+        if (resolvedNumber.isNotBlank() && resolvedNumber != "Unknown") {
+            callType = getCallType(resolvedNumber)
+        }
+    }
 
     // Monitor call state
     DisposableEffect(call) {
@@ -1528,6 +1570,21 @@ fun CallScreen(
                         modifier = Modifier.padding(horizontal = 24.dp)
                     )
                 }
+                
+                // Call type label
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "($callType)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = when (callType) {
+                        "personal call" -> Color(0xFF4A90E2) // Blue for personal
+                        "Admission call" -> Color(0xFF2ECC71) // Green for admission
+                        else -> Color(0xFF8F9BB3) // Gray for unknown
+                    },
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp)
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
