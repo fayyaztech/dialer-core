@@ -600,10 +600,11 @@ class DefaultInCallService : InCallService() {
             audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         } catch (_: Exception) {}
         
-        if (call?.state != Call.STATE_RINGING) {
-            val otherCalls = getAllCalls().filter { it != call && it.state == Call.STATE_ACTIVE }
-            otherCalls.forEach { it.hold() }
-        }
+        // Hold any currently active call regardless of whether this is incoming or outgoing.
+        // For incoming (RINGING) calls this prevents OEM Telecom stacks (Xiaomi, Samsung, etc.)
+        // from disconnecting the active call instead of holding it when the user later answers.
+        val otherActiveCalls = getAllCalls().filter { it != call && it.state == Call.STATE_ACTIVE }
+        otherActiveCalls.forEach { it.hold() }
 
         call?.registerCallback(callCallback)
         updateCallNotification()

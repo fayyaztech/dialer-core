@@ -10,7 +10,14 @@ class CallActionReceiver : BroadcastReceiver() {
         when (intent.action) {
             "ACCEPT_CALL" -> {
                 Log.d("CallActionReceiver", "Accept call action received")
-                DefaultInCallService.currentCall?.answer(0)
+                // Hold any active call before answering the incoming one to prevent OEM Telecom
+                // stacks from disconnecting the active call instead of holding it.
+                val allCalls = DefaultInCallService.getAllCalls()
+                val ringingCall = allCalls.find { it.state == android.telecom.Call.STATE_RINGING }
+                    ?: DefaultInCallService.currentCall
+                allCalls.filter { it.state == android.telecom.Call.STATE_ACTIVE }
+                    .forEach { it.hold() }
+                ringingCall?.answer(0)
             }
             "REJECT_CALL" -> {
                 Log.d("CallActionReceiver", "Reject call action received")

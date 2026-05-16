@@ -563,7 +563,25 @@ class CallScreenActivity : ComponentActivity() {
 
     private fun answerCall() {
         try {
-            currentCall?.answer(0)
+            // Hold any active call BEFORE answering the incoming one.
+            // Without an explicit hold, many OEM Telecom stacks (Xiaomi, Samsung, Oppo …)
+            // disconnect the active call instead of holding it automatically.
+            val activeCalls = DefaultInCallService.getAllCalls()
+                .filter { it != currentCall && it.state == Call.STATE_ACTIVE }
+            activeCalls.forEach {
+                Log.d("CallScreenActivity", "Holding active call before answering incoming")
+                it.hold()
+            }
+
+            // Give the hold a moment to propagate on slower OEM stacks before answering.
+            if (activeCalls.isNotEmpty()) {
+                handler.postDelayed({
+                    currentCall?.answer(0)
+                }, 150)
+            } else {
+                currentCall?.answer(0)
+            }
+
             callStateState.value = "Connecting..."
             try {
                 // ensure we have audio focus and prefer communication mode so speaker routing works
@@ -1144,9 +1162,11 @@ class CallScreenActivity : ComponentActivity() {
         callStateState.value = newCallState
         
         if (previousCall != currentCall) {
-            previousCall?.unregisterCallback(callCallback)
+            // Do NOT unregister the callback from the previous (active/held) call — we still need
+            // to monitor its state changes (e.g. if it unexpectedly disconnects while on hold).
+            // Only register the callback on the new call if not already registered.
             currentCall?.registerCallback(callCallback)
-            Log.d("CallScreenActivity", "Switched currentCall from $previousCall to $currentCall")
+            Log.d("CallScreenActivity", "Switched currentCall from $previousCall to $currentCall (previous callback kept)")
         }
 
         updateCallCount()
