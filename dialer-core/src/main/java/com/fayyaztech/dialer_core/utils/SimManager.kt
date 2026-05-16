@@ -169,13 +169,20 @@ class SimManager(private val context: Context) {
             }
 
             val phoneAccounts = telecomManager?.callCapablePhoneAccounts ?: return null
-            
-            // Find matching phone account
+
+            // Find matching phone account, restricted to actual SIM accounts only.
+            // callCapablePhoneAccounts includes VoIP/SIP/Google-Voice accounts; without this
+            // filter a VoIP account whose extras happen to contain SUBSCRIPTION_ID == subscriptionId
+            // would be selected, causing a "phantom active" call that never rings the recipient.
             phoneAccounts.find { handle ->
                 try {
-                    val account = telecomManager?.getPhoneAccount(handle)
+                    val account = telecomManager?.getPhoneAccount(handle) ?: return@find false
+                    // Only match SIM-backed (cellular) accounts
+                    if (!account.hasCapabilities(android.telecom.PhoneAccount.CAPABILITY_SIM_SUBSCRIPTION)) {
+                        return@find false
+                    }
                     // Try to match by subscription ID in extras
-                    val accountSubId = account?.extras?.getInt("android.telecom.extra.SUBSCRIPTION_ID", -1) ?: -1
+                    val accountSubId = account.extras?.getInt("android.telecom.extra.SUBSCRIPTION_ID", -1) ?: -1
                     accountSubId == subscriptionId
                 } catch (e: Exception) {
                     false

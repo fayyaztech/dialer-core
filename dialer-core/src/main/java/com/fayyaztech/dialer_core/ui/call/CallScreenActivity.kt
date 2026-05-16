@@ -1473,11 +1473,18 @@ fun CallScreen(
         onDispose { call?.unregisterCallback(callback) }
     }
 
-    // Timer effect for call duration
+    // Timer effect for call duration.
+    // Guard against "phantom active" state (VoLTE IMS state skip / wrong PhoneAccount) by
+    // verifying the Telecom call object is still STATE_ACTIVE before each tick.
+    // If the call drops within the first second (ghost call), elapsedTime stays 0 and the
+    // screen closes via the DisposableEffect disconnect handler instead of showing a running timer.
     LaunchedEffect(isActive) {
-        while (isActive) {
-            delay(1000)
+        if (!isActive) return@LaunchedEffect
+        // Wait one tick before starting — avoids showing 0:01 on an immediately-dropped call
+        delay(1000)
+        while (isActive && call?.state == Call.STATE_ACTIVE) {
             elapsedTime += 1
+            delay(1000)
         }
     }
 

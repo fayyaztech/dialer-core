@@ -102,7 +102,10 @@ class CallHelper(private val context: Context) {
                 Log.d(TAG, "Using remembered SIM $preferredSim for $phoneNumber")
                 makeCall(phoneNumber, preferredSim, useSpeaker)
             } else {
-                Log.w(TAG, "Remembered SIM $preferredSim is not active, using default")
+                Log.w(TAG, "Remembered SIM $preferredSim is not active, clearing stale preference")
+                // Clear the stale subscription ID so future calls don't attempt the same
+                // invalid account, which can cause phantom-active calls on some OEM devices.
+                simManager.clearContactSimPreference(phoneNumber)
                 makeCall(phoneNumber, -1, useSpeaker)
             }
         } else {
