@@ -72,6 +72,10 @@ class DefaultInCallService : InCallService() {
         private var audioManager: AudioManager? = null
         private var audioFocusRequest: AudioFocusRequest? = null
         private var hasAudioFocus: Boolean = false
+        // Track whether the user explicitly requested speaker on (vs. OEM auto-routing it)
+        private var speakerForcedByUser: Boolean = false
+        // Whether we have already corrected the initial audio route for this call
+        private var initialRouteFixed: Boolean = false
 
         private val afChangeListener =
                 AudioManager.OnAudioFocusChangeListener { focusChange ->
@@ -236,6 +240,7 @@ class DefaultInCallService : InCallService() {
         }
 
         fun setSpeaker(enable: Boolean) {
+            speakerForcedByUser = enable
             try {
                 val targetRoute =
                         if (enable) {
@@ -596,6 +601,10 @@ class DefaultInCallService : InCallService() {
         // Track the most recent call
         currentCall = call
         
+        // Reset per-call audio route tracking
+        speakerForcedByUser = false
+        initialRouteFixed = false
+        
         try {
             audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         } catch (_: Exception) {}
@@ -721,6 +730,18 @@ class DefaultInCallService : InCallService() {
     override fun onCallAudioStateChanged(audioState: android.telecom.CallAudioState?) {
         super.onCallAudioStateChanged(audioState)
         audioState?.let {
+            // Some OEMs (e.g. Motorola Android 11) silently route audio to SPEAKER when a
+            // call is placed via TelecomManager from a non-default-dialer app. Detect this
+            // and immediately switch back to earpiece if the user never requested speaker.
+            if (!initialRouteFixed && !speakerForcedByUser &&
+                it.route == android.telecom.CallAudioState.ROUTE_SPEAKER) {
+                Log.d(TAG, "onCallAudioStateChanged: OEM forced SPEAKER without user request — routing to EARPIECE")
+                instance?.setAudioRoute(android.telecom.CallAudioState.ROUTE_EARPIECE)
+            }
+            if (!initialRouteFixed) {
+                initialRouteFixed = true
+            }
+
             val intent = Intent(ACTION_AUDIO_STATE_CHANGED).apply {
                 putExtra(EXTRA_AUDIO_STATE, it)
                 setPackage(packageName)
