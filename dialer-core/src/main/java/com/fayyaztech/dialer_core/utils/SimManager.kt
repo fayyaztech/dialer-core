@@ -170,24 +170,67 @@ class SimManager(private val context: Context) {
 
             val phoneAccounts = telecomManager?.callCapablePhoneAccounts ?: return null
 
-            // Find matching phone account, restricted to actual SIM accounts only.
-            // callCapablePhoneAccounts includes VoIP/SIP/Google-Voice accounts; without this
-            // filter a VoIP account whose extras happen to contain SUBSCRIPTION_ID == subscriptionId
-            // would be selected, causing a "phantom active" call that never rings the recipient.
-            phoneAccounts.find { handle ->
+            // Only consider actual SIM-backed (cellular) accounts — filters out VoIP/SIP/
+            // Google-Voice accounts whose extras might coincidentally match subscriptionId.
+            val simAccounts = phoneAccounts.filter { handle ->
+                try {
+                    val account = telecomManager?.getPhoneAccount(handle) ?: return@filter false
+                    account.hasCapabilities(android.telecom.PhoneAccount.CAPABILITY_SIM_SUBSCRIPTION)
+                } catch (e: Exception) { false }
+            }
+
+            // --- Attempt 1: Match via SUBSCRIPTION_ID extra (Pixel, Samsung, most OEMs) ---
+            val bySubId = simAccounts.find { handle ->
                 try {
                     val account = telecomManager?.getPhoneAccount(handle) ?: return@find false
-                    // Only match SIM-backed (cellular) accounts
-                    if (!account.hasCapabilities(android.telecom.PhoneAccount.CAPABILITY_SIM_SUBSCRIPTION)) {
-                        return@find false
-                    }
-                    // Try to match by subscription ID in extras
                     val accountSubId = account.extras?.getInt("android.telecom.extra.SUBSCRIPTION_ID", -1) ?: -1
                     accountSubId == subscriptionId
-                } catch (e: Exception) {
-                    false
+                } catch (e: Exception) { false }
+            }
+            if (bySubId != null) {
+                Log.d(TAG, "getPhoneAccountForSubscription($subscriptionId): matched via SUBSCRIPTION_ID extra")
+                return bySubId
+            }
+
+            // --- Attempt 2: Match via SORT_ORDER == slotIndex (Motorola, Nokia, some OEMs) ---
+            // These devices store SORT_ORDER=0/1 in extras instead of SUBSCRIPTION_ID.
+            val subInfo = subscriptionManager?.getActiveSubscriptionInfo(subscriptionId)
+            val slotIndex = subInfo?.simSlotIndex ?: -1
+            if (slotIndex >= 0) {
+                val bySortOrder = simAccounts.find { handle ->
+                    try {
+                        val account = telecomManager?.getPhoneAccount(handle) ?: return@find false
+                        val sortOrder = account.extras?.getInt("android.telecom.extra.SORT_ORDER", -1) ?: -1
+                        sortOrder == slotIndex
+                    } catch (e: Exception) { false }
+                }
+                if (bySortOrder != null) {
+                    Log.d(TAG, "getPhoneAccountForSubscription($subscriptionId): matched via SORT_ORDER=$slotIndex")
+                    return bySortOrder
                 }
             }
+
+            // --- Attempt 3: Match by ICC ID in PhoneAccountHandle.id (some OEMs) ---
+            val iccId = subInfo?.iccId
+            if (!iccId.isNullOrEmpty()) {
+                val byIcc = simAccounts.find { handle ->
+                    handle.id == iccId || handle.id.endsWith(iccId)
+                }
+                if (byIcc != null) {
+                    Log.d(TAG, "getPhoneAccountForSubscription($subscriptionId): matched via iccId")
+                    return byIcc
+                }
+            }
+
+            // --- Attempt 4: Positional fallback — nth SIM account for nth slot ---
+            // Last resort: if slotIndex is valid and simAccounts are ordered, pick by index.
+            if (slotIndex >= 0 && slotIndex < simAccounts.size) {
+                Log.w(TAG, "getPhoneAccountForSubscription($subscriptionId): using positional fallback (slot=$slotIndex)")
+                return simAccounts[slotIndex]
+            }
+
+            Log.e(TAG, "getPhoneAccountForSubscription($subscriptionId): no matching phone account found (simAccounts=${simAccounts.size}, slotIndex=$slotIndex)")
+            null
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get phone account for subscription $subscriptionId: ${e.message}")
             null
