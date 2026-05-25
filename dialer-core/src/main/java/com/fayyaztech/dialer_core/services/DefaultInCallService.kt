@@ -833,7 +833,11 @@ class DefaultInCallService : InCallService() {
                 .build()
         }
 
-        startForeground(1, notification, getForegroundServiceTypeCompat())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1, notification, getForegroundServiceTypeCompat())
+        } else {
+            startForeground(1, notification)
+        }
     }
 
     private fun showOngoingCallNotification(primaryCall: Call, allCalls: List<Call>) {
@@ -904,14 +908,18 @@ class DefaultInCallService : InCallService() {
                 .build()
         }
 
-        startForeground(1, notification, getForegroundServiceTypeCompat())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1, notification, getForegroundServiceTypeCompat())
+        } else {
+            startForeground(1, notification)
+        }
     }
 
     private fun getForegroundServiceTypeCompat(): Int {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
         } else {
-            0
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
         }
     }
 
